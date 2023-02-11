@@ -268,6 +268,41 @@ impl TryFrom<(&types::PaymentsCaptureData,ConnectorAuthType)> for NmiCaptureRequ
     }
 }
 
+
+impl TryFrom<(&types::PaymentsCancelData,ConnectorAuthType)> for NmiCancelRequest {
+    type Error = error_stack::Report<errors::ConnectorError>;
+    fn try_from(item: (&types::PaymentsCancelData,ConnectorAuthType)) -> Result<Self, Self::Error> {
+        use storage_enums::CaptureMethod::*;
+        use api::payments::PaymentMethod::*;
+        use PaymentType::*;
+
+        let security_key: NmiAuthType = (&item.1).try_into()?;
+        let item = item.0;
+        let security_key = security_key.api_key;
+    //     pub card_number: Secret<String, pii::CardNumber>,
+    // /// The card's expiry month
+    // #[schema(value_type = String, example = "24")]
+    // pub card_exp_month: Secret<String>,
+    // /// The card's expiry year
+    // #[schema(value_type = String, example = "24")]
+    // pub card_exp_year: Secret<String>,
+    // /// The card holder's name
+    // #[schema(value_type = String, example = "John Test")]
+    // pub card_holder_name: Secret<String>,
+    // /// The CVC number for the card
+    // #[schema(value_type = String, example = "242")]
+    // pub card_cvc: Secret<String>,
+
+
+      Ok(NmiCancelRequest {
+        transaction_type : TransactionType::Capture,
+        security_key,
+        transactionid : item.connector_transaction_id.clone(),
+        void_reason: item.cancellation_reason.clone()
+      })
+    }
+}
+
 //TODO: Fill the struct with respective fields
 // Auth Struct
 pub struct NmiAuthType {
@@ -296,7 +331,9 @@ pub enum NmiPaymentStatus {
     Failed,
     #[default]
     Processing,
-    Settled
+    Settled,
+    Canceled,
+    VoidFailed
 }
 
 impl From<NmiPaymentStatus> for enums::AttemptStatus {
@@ -306,7 +343,9 @@ impl From<NmiPaymentStatus> for enums::AttemptStatus {
             NmiPaymentStatus::Failed => Self::Failure,
             NmiPaymentStatus::Captured => Self::CaptureInitiated,
             NmiPaymentStatus::Processing => Self::Pending,
-            NmiPaymentStatus::Settled => Self::Charged
+            NmiPaymentStatus::Settled => Self::Charged,
+            NmiPaymentStatus::Canceled => Self::Voided,
+            NmiPaymentStatus::VoidFailed => Self::VoidFailed,
         }
     }
 }
@@ -341,6 +380,16 @@ pub struct NmiCaptureRequest {
 }
 
 
+#[derive(Default, Debug, Serialize, Eq, PartialEq)]
+pub struct NmiCancelRequest {
+    #[serde(rename = "type")]
+    pub transaction_type: TransactionType,
+    pub security_key: String,
+    pub transactionid: String,
+    pub void_reason: Option<String>
+}
+
+
 
 impl From<NmiSyncResponseStatus> for enums::AttemptStatus {
     fn from(item: NmiSyncResponseStatus) -> Self {
@@ -350,7 +399,7 @@ impl From<NmiSyncResponseStatus> for enums::AttemptStatus {
             NmiSyncResponseStatus::pending => Self::Authorized,
             NmiSyncResponseStatus::canceled => Self::Voided,
             NmiSyncResponseStatus::complete => Self::Charged,
-            NmiSyncResponseStatus::unknown => Self::Failure
+            NmiSyncResponseStatus::unknown => Self::Failure,
         }
     }
 }
