@@ -5,9 +5,11 @@ pub mod authorizedotnet;
 pub mod braintree;
 pub mod checkout;
 pub mod cybersource;
+pub mod dlocal;
 pub mod fiserv;
 pub mod globalpay;
 pub mod klarna;
+pub mod nmi;
 pub mod payu;
 pub mod rapyd;
 pub mod shift4;
@@ -15,8 +17,6 @@ pub mod stripe;
 pub mod utils;
 pub mod worldline;
 pub mod worldpay;
-
-pub mod dlocal;
 
 pub use self::{
     aci::Aci, adyen::Adyen, applepay::Applepay, authorizedotnet::Authorizedotnet,
