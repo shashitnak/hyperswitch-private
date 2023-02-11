@@ -3,12 +3,12 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Deserialize)]
 pub struct NmiPaymentsResponse {
   pub response: String,
-  pub responsetext: String,
+  pub response_text: String,
   pub authcode: String,
-  pub transactionid: String,
+  pub transaction_id: String,
   pub avsresponse: String,
   pub cvvresponse: Option<String>,
-  pub orderid: String,
+  pub order_id: String,
   #[serde(rename = "type")]
   pub transaction_type: String,
   pub response_code: String,
