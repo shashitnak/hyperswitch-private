@@ -9,6 +9,7 @@ mod cybersource;
 mod dlocal;
 mod fiserv;
 mod globalpay;
+mod nmi;
 mod payu;
 mod rapyd;
 mod shift4;
