@@ -6,7 +6,7 @@ use masking::PeekInterface;
 
 use super::{
     requests::*,
-    responses::*
+    responses::{self, *}
     // response::{GlobalpayPaymentStatus, GlobalpayPaymentsResponse, GlobalpayRefreshTokenResponse},
 };
 use crate::{
@@ -185,13 +185,29 @@ impl TryFrom<&types::PaymentsAuthorizeRouterData> for NmiPaymentsRequest {
 //     }
 // }
 
-impl From<String> for enums::AttemptStatus {
+enum Status {
+    Success,
+    Failure
+}
+
+impl From<String> for Status {
     fn from(item: String) -> Self {
         match item.as_str() {
+            "100" => Self::Success,
+            "200" => Self::Failure,
+            _ => panic!("Invalid response code")
+        }
+    }
+}
+
+impl From<Status> for storage_enums::AttemptStatus {
+    fn from(item: Status) -> Self {
+        use Status::*;
+        match item {
             // GlobalpayPaymentStatus::Captured | GlobalpayPaymentStatus::Funded => Self::Charged,
             // GlobalpayPaymentStatus::Declined | GlobalpayPaymentStatus::Rejected => Self::Failure,
-            "100" => Self::Authorized,
-            "200" => Self::Failure,
+            Success => Self::Authorized,
+            Failure => Self::Failure,
             _ => panic!("Couldn't convert")
         }
     }
@@ -243,10 +259,17 @@ impl<F, T>
             types::PaymentsResponseData,
         >,
     ) -> Result<Self, Self::Error> {
-        let status = storage_enums::AttemptStatus::from(item.response.response_code);
+        let status: Status = item.response.response_code.into();
+        let status: storage_enums::AttemptStatus = status.into();
         Ok(Self {
             status,
-            response: item.response,
+            response: Ok(types::PaymentsResponseData::TransactionResponse {
+                resource_id: types::ResponseId::ConnectorTransactionId(item.response.order_id),
+                redirection_data: None,
+                redirect: false,
+                mandate_reference: None,
+                connector_metadata: None,
+            }),
             ..item.data
         })
     }
