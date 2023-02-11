@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use masking::PeekInterface;
 
 use super::{
-    requests::{self, *},
+    requests::*,
+    responses::*
     // response::{GlobalpayPaymentStatus, GlobalpayPaymentsResponse, GlobalpayRefreshTokenResponse},
 };
 use crate::{
@@ -48,8 +49,9 @@ impl TryFrom<&types::PaymentsAuthorizeRouterData> for NmiPaymentsRequest {
             _ => error()?
         };
         let security_key: NmiAuthType = (&item.connector_auth_type).try_into()?;
+        let security_key = security_key.api_key;
 
-        let card = match item.request.payment_method_data {
+        let card = match &item.request.payment_method_data {
             Card(card) => card,
             _ => error()?
         };
@@ -71,10 +73,11 @@ impl TryFrom<&types::PaymentsAuthorizeRouterData> for NmiPaymentsRequest {
     let address = item
         .address
         .billing
+        .as_ref()
         .unwrap();
     
-    let phone = address.phone.unwrap();
-    let address = address.address.unwrap();
+    let phone = address.phone.as_ref().unwrap();
+    let address = address.address.as_ref().unwrap();
 
       Ok(NmiPaymentsRequest {
         transaction_type,
@@ -102,7 +105,7 @@ impl TryFrom<&types::PaymentsAuthorizeRouterData> for NmiPaymentsRequest {
         state                   : None,
         zip                     : address.get_zip().unwrap().peek().to_string(),
         country                 : address.get_country().unwrap().to_string(),
-        phone                   : phone.country_code.unwrap().clone() + &phone.number.unwrap().peek().to_string()
+        phone                   : phone.country_code.as_ref().unwrap().clone() + &phone.number.as_ref().unwrap().peek().to_string()
       })
     }
 }
@@ -182,17 +185,17 @@ impl TryFrom<&types::PaymentsAuthorizeRouterData> for NmiPaymentsRequest {
 //     }
 // }
 
-// impl From<GlobalpayPaymentStatus> for enums::AttemptStatus {
-//     fn from(item: GlobalpayPaymentStatus) -> Self {
-//         match item {
-//             GlobalpayPaymentStatus::Captured | GlobalpayPaymentStatus::Funded => Self::Charged,
-//             GlobalpayPaymentStatus::Declined | GlobalpayPaymentStatus::Rejected => Self::Failure,
-//             GlobalpayPaymentStatus::Preauthorized => Self::Authorized,
-//             GlobalpayPaymentStatus::Reversed => Self::Voided,
-//             GlobalpayPaymentStatus::Initiated | GlobalpayPaymentStatus::Pending => Self::Pending,
-//         }
-//     }
-// }
+impl From<String> for enums::AttemptStatus {
+    fn from(item: String) -> Self {
+        match item.as_str() {
+            // GlobalpayPaymentStatus::Captured | GlobalpayPaymentStatus::Funded => Self::Charged,
+            // GlobalpayPaymentStatus::Declined | GlobalpayPaymentStatus::Rejected => Self::Failure,
+            "100" => Self::Authorized,
+            "200" => Self::Failure,
+            _ => panic!("Couldn't convert")
+        }
+    }
+}
 
 // impl From<GlobalpayPaymentStatus> for enums::RefundStatus {
 //     fn from(item: GlobalpayPaymentStatus) -> Self {
@@ -227,27 +230,27 @@ impl TryFrom<&types::PaymentsAuthorizeRouterData> for NmiPaymentsRequest {
 //     }
 // }
 
-// impl<F, T>
-//     TryFrom<types::ResponseRouterData<F, GlobalpayPaymentsResponse, T, types::PaymentsResponseData>>
-//     for types::RouterData<F, T, types::PaymentsResponseData>
-// {
-//     type Error = error_stack::Report<errors::ConnectorError>;
-//     fn try_from(
-//         item: types::ResponseRouterData<
-//             F,
-//             GlobalpayPaymentsResponse,
-//             T,
-//             types::PaymentsResponseData,
-//         >,
-//     ) -> Result<Self, Self::Error> {
-//         let status = enums::AttemptStatus::from(item.response.status);
-//         Ok(Self {
-//             status,
-//             response: get_payment_response(status, item.response),
-//             ..item.data
-//         })
-//     }
-// }
+impl<F, T>
+    TryFrom<types::ResponseRouterData<F, responses::NmiPaymentsResponse, T, types::PaymentsResponseData>>
+    for types::RouterData<F, T, types::PaymentsResponseData>
+{
+    type Error = error_stack::Report<errors::ConnectorError>;
+    fn try_from(
+        item: types::ResponseRouterData<
+            F,
+            responses::NmiPaymentsResponse,
+            T,
+            types::PaymentsResponseData,
+        >,
+    ) -> Result<Self, Self::Error> {
+        let status = storage_enums::AttemptStatus::from(item.response.response_code);
+        Ok(Self {
+            status,
+            response: item.response,
+            ..item.data
+        })
+    }
+}
 
 // impl<F, T>
 //     TryFrom<types::ResponseRouterData<F, GlobalpayRefreshTokenResponse, T, types::AccessToken>>
