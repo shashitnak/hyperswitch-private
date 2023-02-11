@@ -8,7 +8,7 @@ use crate::{
     types::{
         self, api,
         storage::{enums, enums as storage_enums},
-        ErrorResponse,
+        ErrorResponse, ConnectorAuthType,
     },
 };
 use error_stack::IntoReport;
@@ -47,6 +47,12 @@ pub struct NmiPaymentsRequest {
     pub phone: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct NmiSyncRequest {
+  pub transaction_id          : String,
+  pub security_key            : String
+}
+
 #[derive(Default, Debug, Serialize, Eq, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum BillingMethod {
@@ -55,8 +61,8 @@ pub enum BillingMethod {
     Installment,
 }
 
-#[derive(Default, Debug, Serialize, Eq, PartialEq)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
 pub enum TransactionType {
     Sale,
     #[default]
@@ -64,6 +70,9 @@ pub enum TransactionType {
     Credit,
     Validate,
     Offline,
+    Capture,
+    Void,
+    Refund
 }
 
 #[derive(Default, Debug, Serialize, Eq, PartialEq)]
@@ -196,6 +205,69 @@ impl TryFrom<&types::PaymentsAuthorizeRouterData> for NmiPaymentsRequest {
     }
 }
 
+impl TryFrom<(&types::PaymentsSyncData, ConnectorAuthType)> for NmiSyncRequest {
+    type Error = error_stack::Report<errors::ConnectorError>;
+    fn try_from(item: (&types::PaymentsSyncData,ConnectorAuthType)) -> Result<Self, Self::Error> {
+        let security_key: NmiAuthType = (&item.1).try_into()?;
+        let security_key : String = security_key.api_key;
+    //     pub card_number: Secret<String, pii::CardNumber>,
+    // /// The card's expiry month
+    // #[schema(value_type = String, example = "24")]
+    // pub card_exp_month: Secret<String>,
+    // /// The card's expiry year
+    // #[schema(value_type = String, example = "24")]
+    // pub card_exp_year: Secret<String>,
+    // /// The card holder's name
+    // #[schema(value_type = String, example = "John Test")]
+    // pub card_holder_name: Secret<String>,
+    // /// The CVC number for the card
+    // #[schema(value_type = String, example = "242")]
+    // pub card_cvc: Secret<String>,
+
+
+      Ok(NmiSyncRequest {
+        security_key,
+        transaction_id : item.0.connector_transaction_id.get_connector_transaction_id().unwrap()
+      })
+    }
+}
+
+
+
+impl TryFrom<(&types::PaymentsCaptureData,ConnectorAuthType)> for NmiCaptureRequest {
+    type Error = error_stack::Report<errors::ConnectorError>;
+    fn try_from(item: (&types::PaymentsCaptureData,ConnectorAuthType)) -> Result<Self, Self::Error> {
+        use storage_enums::CaptureMethod::*;
+        use api::payments::PaymentMethod::*;
+        use PaymentType::*;
+
+        let security_key: NmiAuthType = (&item.1).try_into()?;
+        let item = item.0;
+        let security_key = security_key.api_key;
+    //     pub card_number: Secret<String, pii::CardNumber>,
+    // /// The card's expiry month
+    // #[schema(value_type = String, example = "24")]
+    // pub card_exp_month: Secret<String>,
+    // /// The card's expiry year
+    // #[schema(value_type = String, example = "24")]
+    // pub card_exp_year: Secret<String>,
+    // /// The card holder's name
+    // #[schema(value_type = String, example = "John Test")]
+    // pub card_holder_name: Secret<String>,
+    // /// The CVC number for the card
+    // #[schema(value_type = String, example = "242")]
+    // pub card_cvc: Secret<String>,
+
+
+      Ok(NmiCaptureRequest {
+        transaction_type : TransactionType::Capture,
+        security_key,
+        transactionid : item.connector_transaction_id.clone(),
+        amount : Some(item.amount.to_string() + ".00")
+      })
+    }
+}
+
 //TODO: Fill the struct with respective fields
 // Auth Struct
 pub struct NmiAuthType {
@@ -219,18 +291,22 @@ impl TryFrom<&types::ConnectorAuthType> for NmiAuthType {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum NmiPaymentStatus {
-    Succeeded,
+    Authorised,
+    Captured,
     Failed,
     #[default]
     Processing,
+    Settled
 }
 
 impl From<NmiPaymentStatus> for enums::AttemptStatus {
     fn from(item: NmiPaymentStatus) -> Self {
         match item {
-            NmiPaymentStatus::Succeeded => Self::Charged,
+            NmiPaymentStatus::Authorised => Self::Authorized,
             NmiPaymentStatus::Failed => Self::Failure,
-            NmiPaymentStatus::Processing => Self::Authorizing,
+            NmiPaymentStatus::Captured => Self::CaptureInitiated,
+            NmiPaymentStatus::Processing => Self::Pending,
+            NmiPaymentStatus::Settled => Self::Charged
         }
     }
 }
@@ -240,6 +316,49 @@ impl From<NmiPaymentStatus> for enums::AttemptStatus {
 pub struct NmiPaymentsResponse {
     pub status: NmiPaymentStatus,
     pub id: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum NmiSyncResponseStatus {
+    pendingSettlement,
+    pending,
+    #[default]
+    failed,
+    canceled,
+    complete,
+    unknown
+}
+
+
+#[derive(Default, Debug, Serialize, Eq, PartialEq)]
+pub struct NmiCaptureRequest {
+    #[serde(rename = "type")]
+    pub transaction_type: TransactionType,
+    pub security_key: String,
+    pub transactionid: String,
+    pub amount : Option<String>
+}
+
+
+
+impl From<NmiSyncResponseStatus> for enums::AttemptStatus {
+    fn from(item: NmiSyncResponseStatus) -> Self {
+        match item {
+            NmiSyncResponseStatus::pendingSettlement => Self::CaptureInitiated,
+            NmiSyncResponseStatus::failed => Self::Failure,
+            NmiSyncResponseStatus::pending => Self::Authorized,
+            NmiSyncResponseStatus::canceled => Self::Voided,
+            NmiSyncResponseStatus::complete => Self::Charged,
+            NmiSyncResponseStatus::unknown => Self::Failure
+        }
+    }
+}
+
+#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NmiSyncResponse {
+    pub condition : NmiSyncResponseStatus,
+    pub transaction_id : String
 }
 
 impl<F, T>
@@ -263,6 +382,74 @@ impl<F, T>
         })
     }
 }
+
+impl<F, Req>
+    TryFrom<types::ResponseRouterData<F, NmiSyncResponse, Req, types::PaymentsResponseData>>
+    for types::RouterData<F, Req, types::PaymentsResponseData>
+{
+    type Error = error_stack::Report<errors::ConnectorError>;
+    fn try_from(
+        items: types::ResponseRouterData<F, NmiSyncResponse, Req, types::PaymentsResponseData>,
+    ) -> Result<Self, Self::Error> {
+        
+        let response = items.response;
+
+        Ok(Self {
+            status: enums::AttemptStatus::from(response.condition.clone()),
+            response: Ok(types::PaymentsResponseData::TransactionResponse {
+                resource_id: types::ResponseId::ConnectorTransactionId(response.transaction_id),
+                redirect: false,
+                redirection_data: None,
+                mandate_reference: None,
+                connector_metadata: None
+            }),
+            ..items.data
+        })
+    }
+}
+
+#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NmiCaptureResponse {
+    response: usize,
+    responseText: Option<String>,
+    #[serde(rename = "type")]
+    transaction_type: TransactionType,
+    transactionid : Option<String>
+}
+
+
+// impl<F, T>
+//     TryFrom<
+//         types::ResponseRouterData<F, NmiPaymentsResponse, T, types::PaymentsResponseData>,
+//     > for types::RouterData<F, T, types::PaymentsResponseData>
+// {
+//     type Error = error_stack::Report<errors::ConnectorError>;
+//     fn try_from(
+//         item: types::ResponseRouterData<
+//             F,
+//             NmiPaymentsResponse,
+//             T,
+//             types::PaymentsResponseData,
+//         >,
+//     ) -> Result<Self, Self::Error> {
+//         let response = item.response;
+//         Ok(Self {
+//             status: match response.status {
+//                 NmiPaymentStatus::Captured => enums::AttemptStatus::CaptureInitiated,
+//                 _ => enums::AttemptStatus::CaptureFailed
+//             },
+//             response: Ok(types::PaymentsResponseData::TransactionResponse {
+//                 resource_id: types::ResponseId::ConnectorTransactionId(response.transactionid.unwrap()),
+//                 redirect: false,
+//                 redirection_data: None,
+//                 mandate_reference: None,
+//                 connector_metadata: None,
+//             }),
+//             amount_captured: None,
+//             ..item.data
+//         })
+//     }
+// }
 
 //TODO: Fill the struct with respective fields
 // REFUND :
