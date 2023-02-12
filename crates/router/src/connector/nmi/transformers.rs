@@ -390,11 +390,10 @@ pub struct NmiCancelRequest {
 }
 
 
-
 impl From<NmiSyncResponseStatus> for enums::AttemptStatus {
     fn from(item: NmiSyncResponseStatus) -> Self {
         match item {
-            NmiSyncResponseStatus::pendingSettlement => Self::CaptureInitiated,
+            NmiSyncResponseStatus::pendingSettlement => Self::Charged,
             NmiSyncResponseStatus::failed => Self::Failure,
             NmiSyncResponseStatus::pending => Self::Authorized,
             NmiSyncResponseStatus::canceled => Self::Voided,
@@ -504,12 +503,45 @@ pub struct NmiCaptureResponse {
 // REFUND :
 // Type definition for RefundRequest
 #[derive(Default, Debug, Serialize)]
-pub struct NmiRefundRequest {}
+pub struct NmiRefundRequest {
+    #[serde(rename = "type")]
+    transaction_type : TransactionType,
+    security_key : String,
+    transactionid : String,
+    amount : Option<String>
+}
 
-impl<F> TryFrom<&types::RefundsRouterData<F>> for NmiRefundRequest {
-    type Error = error_stack::Report<errors::ParsingError>;
-    fn try_from(_item: &types::RefundsRouterData<F>) -> Result<Self, Self::Error> {
-        todo!()
+impl TryFrom<(&types::RefundsData,ConnectorAuthType)> for NmiRefundRequest {
+    type Error = error_stack::Report<errors::ConnectorError>;
+    fn try_from(item: (&types::RefundsData,ConnectorAuthType)) -> Result<Self, Self::Error> {
+        use storage_enums::CaptureMethod::*;
+        use api::payments::PaymentMethod::*;
+        use PaymentType::*;
+
+        let security_key: NmiAuthType = (&item.1).try_into()?;
+        let item = item.0;
+        let security_key = security_key.api_key;
+    //     pub card_number: Secret<String, pii::CardNumber>,
+    // /// The card's expiry month
+    // #[schema(value_type = String, example = "24")]
+    // pub card_exp_month: Secret<String>,
+    // /// The card's expiry year
+    // #[schema(value_type = String, example = "24")]
+    // pub card_exp_year: Secret<String>,
+    // /// The card holder's name
+    // #[schema(value_type = String, example = "John Test")]
+    // pub card_holder_name: Secret<String>,
+    // /// The CVC number for the card
+    // #[schema(value_type = String, example = "242")]
+    // pub card_cvc: Secret<String>,
+
+
+      Ok(NmiRefundRequest {
+        transaction_type : TransactionType::Refund,
+        security_key,
+        transactionid : item.connector_transaction_id.clone(),
+        amount : Some(item.amount.to_string() + ".00")
+      })
     }
 }
 
@@ -536,30 +568,74 @@ impl From<RefundStatus> for enums::RefundStatus {
 }
 
 //TODO: Fill the struct with respective fields
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
-pub struct RefundResponse {}
+// #[derive(Default, Debug, Clone, Serialize, Deserialize)]
+// pub struct RefundResponse {
+//     refund_id: String,
+//     connector_transaction_id: String,
+//     connector_refund_id: Option<String>,
+//     amount: i64,
+//     reason: Option<String>,
+//     refund_amount: i64,
+//     // response: usize,
+//     // responseText: Option<String>,
+//     // #[serde(rename = "type")]
+//     // transaction_type: TransactionType,
+//     // transactionid : Option<String>,
+// }
 
-impl TryFrom<types::RefundsResponseRouterData<api::Execute, RefundResponse>>
-    for types::RefundsRouterData<api::Execute>
-{
-    type Error = error_stack::Report<errors::ParsingError>;
-    fn try_from(
-        _item: types::RefundsResponseRouterData<api::Execute, RefundResponse>,
-    ) -> Result<Self, Self::Error> {
-        todo!()
-    }
-}
 
-impl TryFrom<types::RefundsResponseRouterData<api::RSync, RefundResponse>>
-    for types::RefundsRouterData<api::RSync>
-{
-    type Error = error_stack::Report<errors::ParsingError>;
-    fn try_from(
-        _item: types::RefundsResponseRouterData<api::RSync, RefundResponse>,
-    ) -> Result<Self, Self::Error> {
-        todo!()
-    }
-}
+// impl TryFrom<types::RefundsResponseRouterData<api::Execute, types::RefundsResponseData>>
+//     for types::RefundsRouterData<api::Execute>
+// {
+//     type Error = error_stack::Report<errors::ParsingError>;
+//     fn try_from(
+//         item: types::RefundsResponseRouterData<api::Execute, types::RefundsResponseData>
+//     ) -> Result<Self, Self::Error> {
+
+//     //     pub refund_id: String,
+//     // pub connector_transaction_id: String,
+
+//     // pub connector_refund_id: Option<String>,
+//     // pub currency: storage_enums::Currency,
+//     // /// Amount for the payment against which this refund is issued
+//     // pub amount: i64,
+//     // pub reason: Option<String>,
+//     // /// Amount to be refunded
+//     // pub refund_amount: i64,
+//     // /// Arbitrary metadata required for refund
+//     // pub connector_metadata: Option<serde_json::Value>
+
+//     let status = item.response.refund_status;
+
+//         Ok(Self {
+//             status: match status {
+
+//             },
+//             response: Ok(item.response),
+//             // response: Ok(RefundResponse {
+//             //     connector_refund_id: ,
+//             //     refund_status: storage_enums::RefundStatus,
+//                 // refund_id: item.response.id,
+//                 // redirection_data: None,
+//                 // redirect: false,
+//                 // mandate_reference: None,
+//                 // connector_metadata: None,
+//             // }),
+//             ..item.data
+//         })
+//     }
+// }
+
+// impl TryFrom<types::RefundsResponseRouterData<api::RSync, RefundResponse>>
+//     for types::RefundsRouterData<api::RSync>
+// {
+//     type Error = error_stack::Report<errors::ParsingError>;
+//     fn try_from(
+//         _item: types::RefundsResponseRouterData<api::RSync, RefundResponse>,
+//     ) -> Result<Self, Self::Error> {
+//         todo!()
+//     }
+// }
 
 //TODO: Fill the struct with respective fields
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq)]
