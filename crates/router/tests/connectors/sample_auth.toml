@@ -53,3 +53,6 @@ api_secret = "API Secret Key"
 key1 = "key1"
 api_key = "api_key"
 api_secret = "secret"
+
+[nmi]
+api_key = "8Y3tHmW64sWDpcRdDGyeu2kek22Tx8Sm"
