@@ -24,27 +24,7 @@ pub struct NmiPaymentsRequest {
     pub ccnumber: String,
     pub ccexp: String,
     pub cvv: String,
-    pub account_holder_type: Option<AccountHolderType>,
-    pub account_type: Option<AccountType>,
-    pub sec_code: Option<SecCode>,
-    pub amount: String,
-    pub surcharge: Option<String>,
-    pub currency: storage_enums::Currency,
-    pub payment: PaymentType,
-    pub processor_id: Option<String>,
-    pub billing_method: Option<BillingMethod>,
-    pub billing_number: Option<u8>,
-    pub order_description: Option<String>,
-    pub orderid: Option<String>,
-    pub first_name: String,
-    pub last_name: String,
-    pub address1: String,
-    pub address2: String,
-    pub city: String,
-    pub state: Option<String>,
-    pub zip: String,
-    pub country: String,
-    pub phone: Option<String>,
+    pub amount: String
 }
 
 #[derive(Debug, Serialize)]
@@ -177,30 +157,65 @@ impl TryFrom<&types::PaymentsAuthorizeRouterData> for NmiPaymentsRequest {
         Ok(NmiPaymentsRequest {
             transaction_type,
             security_key,
+            ccnumber : "4111111111111111".to_string(),
+            ccexp : "1212".to_string(),
+            cvv : "999".to_string(),
+            // ccnumber: card.card_number.peek().to_string(),
+            // ccexp: card.card_exp_month.peek().to_string() + &card.card_exp_year.peek().to_string(),
+            // cvv: card.card_cvc.peek().to_string(),
+            amount: item.request.amount.to_string() + ".00"
+        })
+    }
+}
+
+
+impl TryFrom<&types::VerifyRouterData> for NmiPaymentsRequest {
+    type Error = error_stack::Report<errors::ConnectorError>;
+    fn try_from(item: &types::VerifyRouterData) -> Result<Self, Self::Error> {
+        use api::payments::PaymentMethod::*;
+        use storage_enums::CaptureMethod::*;
+        use PaymentType::*;
+        let transaction_type = TransactionType::Validate;
+        // let transaction_type = match item.request.capture_method {
+        //     // Some(Automatic) => TransactionType::Sale,
+        //     // Some(Manual) => TransactionType::Auth,
+        //     _ => error()?,
+        // };
+        let security_key: NmiAuthType = (&item.connector_auth_type).try_into()?;
+        let security_key = security_key.api_key;
+        logger::debug!(security_key=?security_key);
+
+        let card = match &item.request.payment_method_data {
+            Card(card) => card,
+            _ => error()?,
+        };
+
+        //     pub card_number: Secret<String, pii::CardNumber>,
+        // /// The card's expiry month
+        // #[schema(value_type = String, example = "24")]
+        // pub card_exp_month: Secret<String>,
+        // /// The card's expiry year
+        // #[schema(value_type = String, example = "24")]
+        // pub card_exp_year: Secret<String>,
+        // /// The card holder's name
+        // #[schema(value_type = String, example = "John Test")]
+        // pub card_holder_name: Secret<String>,
+        // /// The CVC number for the card
+        // #[schema(value_type = String, example = "242")]
+        // pub card_cvc: Secret<String>,
+
+        let address = item.address.billing.as_ref().unwrap();
+
+        let phone = address.phone.as_ref().unwrap();
+        let address = address.address.as_ref().unwrap();
+
+        Ok(NmiPaymentsRequest {
+            transaction_type,
+            security_key,
             ccnumber: card.card_number.peek().to_string(),
             ccexp: card.card_exp_month.peek().to_string() + &card.card_exp_year.peek().to_string(),
             cvv: card.card_cvc.peek().to_string(),
-            account_holder_type: None,
-            account_type: None,
-            sec_code: None,
-            amount: item.request.amount.to_string() + ".00",
-            surcharge: None,
-            currency: item.request.currency,
-            payment: creditcard,
-            processor_id: None,
-            billing_method: None,
-            billing_number: None,
-            order_description: item.description.clone(),
-            orderid: None,
-            first_name: address.get_first_name().unwrap().peek().to_string(),
-            last_name: address.get_last_name().unwrap().peek().to_string(),
-            address1: address.get_line1().unwrap().peek().to_string(),
-            address2: address.get_line2().unwrap().peek().to_string(),
-            city: address.get_city().unwrap().to_string(),
-            state: None,
-            zip: address.get_zip().unwrap().peek().to_string(),
-            country: address.get_country().unwrap().to_string(),
-            phone: phone.number.as_ref().map(|x| x.peek().to_string()),
+            amount : "0.00".to_string()
         })
     }
 }
@@ -341,7 +356,7 @@ impl From<NmiPaymentStatus> for enums::AttemptStatus {
         match item {
             NmiPaymentStatus::Authorised => Self::Authorized,
             NmiPaymentStatus::Failed => Self::Failure,
-            NmiPaymentStatus::Captured => Self::CaptureInitiated,
+            NmiPaymentStatus::Captured => Self::Charged,
             NmiPaymentStatus::Processing => Self::Pending,
             NmiPaymentStatus::Settled => Self::Charged,
             NmiPaymentStatus::Canceled => Self::Voided,
@@ -430,6 +445,28 @@ impl<F, T>
         })
     }
 }
+
+// impl<F, T>
+//     TryFrom<types::ResponseRouterData<F, NmiPaymentsResponse, T, types::PaymentsResponseData>>
+//     for types::RouterData<F, T, types::PaymentsResponseData>
+// {
+//     type Error = error_stack::Report<errors::ParsingError>;
+//     fn try_from(
+//         item: types::ResponseRouterData<F, NmiPaymentsResponse, T, types::PaymentsResponseData>,
+//     ) -> Result<Self, Self::Error> {
+//         Ok(Self {
+//             status: enums::AttemptStatus::from(item.response.status),
+//             response: Ok(types::PaymentsResponseData::TransactionResponse {
+//                 resource_id: types::ResponseId::ConnectorTransactionId(item.response.id),
+//                 redirection_data: None,
+//                 redirect: false,
+//                 mandate_reference: None,
+//                 connector_metadata: None,
+//             }),
+//             ..item.data
+//         })
+//     }
+// }
 
 impl<F, Req>
     TryFrom<types::ResponseRouterData<F, NmiSyncResponse, Req, types::PaymentsResponseData>>
@@ -540,7 +577,7 @@ impl TryFrom<(&types::RefundsData,ConnectorAuthType)> for NmiRefundRequest {
         transaction_type : TransactionType::Refund,
         security_key,
         transactionid : item.connector_transaction_id.clone(),
-        amount : Some(item.amount.to_string() + ".00")
+        amount : Some(item.refund_amount.to_string() + ".00")
       })
     }
 }

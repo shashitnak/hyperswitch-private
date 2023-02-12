@@ -288,10 +288,10 @@ async fn should_fail_payment_for_incorrect_card_number() {
         )
         .await
         .unwrap();
-    assert_eq!(
-        response.response.unwrap_err().message,
-        "Your card number is incorrect.".to_string(),
-    );
+        assert_eq!(
+            response.status,
+            enums::AttemptStatus::Failure
+        );
 }
 
 // Creates a payment with empty card number.
@@ -310,34 +310,38 @@ async fn should_fail_payment_for_empty_card_number() {
         )
         .await
         .unwrap();
-    let x = response.response.unwrap_err();
     assert_eq!(
-        x.message,
-        "You passed an empty string for 'payment_method_data[card][number]'.",
+        response.status,
+        enums::AttemptStatus::Failure
     );
 }
 
 // Creates a payment with incorrect CVC.
-#[actix_web::test]
-async fn should_fail_payment_for_incorrect_cvc() {
-    let response = CONNECTOR
-        .make_payment(
-            Some(types::PaymentsAuthorizeData {
-                payment_method_data: types::api::PaymentMethod::Card(api::Card {
-                    card_cvc: Secret::new("12345".to_string()),
-                    ..utils::CCardType::default().0
-                }),
-                ..utils::PaymentAuthorizeType::default().0
-            }),
-            None,
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        response.response.unwrap_err().message,
-        "Your card's security code is invalid.".to_string(),
-    );
-}
+// #[actix_web::test]
+
+
+// NOT APPLICABLE, PROCESSOR MARKS TXN AS SUCCESSFULL WITH INCORRECT CVV
+
+
+// async fn should_fail_payment_for_incorrect_cvc() {
+//     let response = CONNECTOR
+//         .make_payment(
+//             Some(types::PaymentsAuthorizeData {
+//                 payment_method_data: types::api::PaymentMethod::Card(api::Card {
+//                     card_cvc: Secret::new("12345".to_string()),
+//                     ..utils::CCardType::default().0
+//                 }),
+//                 ..utils::PaymentAuthorizeType::default().0
+//             }),
+//             None,
+//         )
+//         .await
+//         .unwrap();
+//     assert_eq!(
+//         response.response.unwrap_err().message,
+//         "Your card's security code is invalid.".to_string(),
+//     );
+// }
 
 // Creates a payment with incorrect expiry month.
 #[actix_web::test]
@@ -355,10 +359,10 @@ async fn should_fail_payment_for_invalid_exp_month() {
         )
         .await
         .unwrap();
-    assert_eq!(
-        response.response.unwrap_err().message,
-        "Your card's expiration month is invalid.".to_string(),
-    );
+        assert_eq!(
+            response.status,
+            enums::AttemptStatus::Failure
+        );
 }
 
 // Creates a payment with incorrect expiry year.
@@ -377,28 +381,31 @@ async fn should_fail_payment_for_incorrect_expiry_year() {
         )
         .await
         .unwrap();
-    assert_eq!(
-        response.response.unwrap_err().message,
-        "Your card's expiration year is invalid.".to_string(),
-    );
+        assert_eq!(
+            response.status,
+            enums::AttemptStatus::Failure
+        );
 }
 
 // Voids a payment using automatic capture flow (Non 3DS).
-#[actix_web::test]
-async fn should_fail_void_payment_for_auto_capture() {
-    let authorize_response = CONNECTOR.make_payment(None, None).await.unwrap();
-    assert_eq!(authorize_response.status, enums::AttemptStatus::Charged);
-    let txn_id = utils::get_connector_transaction_id(authorize_response.response);
-    assert_ne!(txn_id, None, "Empty connector transaction id");
-    let void_response = CONNECTOR
-        .void_payment(txn_id.unwrap(), None, None)
-        .await
-        .unwrap();
-    assert_eq!(
-        void_response.response.unwrap_err().message,
-        "You cannot cancel this PaymentIntent because it has a status of succeeded."
-    );
-}
+
+// INVALID TEST CASE, PG RETURNS SUCCESS ON VOID FOR CAPTURED TXNS
+
+// #[actix_web::test]
+// async fn should_fail_void_payment_for_auto_capture() {
+//     let authorize_response = CONNECTOR.make_payment(None, None).await.unwrap();
+//     assert_eq!(authorize_response.status, enums::AttemptStatus::Charged);
+//     let txn_id = utils::get_connector_transaction_id(authorize_response.response);
+//     assert_ne!(txn_id, None, "Empty connector transaction id");
+//     let void_response = CONNECTOR
+//         .void_payment(txn_id.unwrap(), None, None)
+//         .await
+//         .unwrap();
+//     assert_eq!(
+//         void_response.status,
+//         enums::AttemptStatus::VoidFailed
+//     );
+// }
 
 // Captures a payment using invalid connector payment id.
 #[actix_web::test]
@@ -408,8 +415,8 @@ async fn should_fail_capture_for_invalid_payment() {
         .await
         .unwrap();
     assert_eq!(
-        capture_response.response.unwrap_err().message,
-        String::from("No such payment_intent: '123456789'")
+        capture_response.status,
+        enums::AttemptStatus::Failure,
     );
 }
 
@@ -427,10 +434,10 @@ async fn should_fail_for_refund_amount_higher_than_payment_amount() {
         )
         .await
         .unwrap();
-    assert_eq!(
-        response.response.unwrap_err().message,
-        "Refund amount (₹1.50) is greater than charge amount (₹1.00)",
-    );
+        assert_eq!(
+            response.response.unwrap().refund_status,
+            enums::RefundStatus::Failure,
+        );
 }
 
 // Connector dependent test cases goes here
