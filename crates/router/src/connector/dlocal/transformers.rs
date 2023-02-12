@@ -33,7 +33,13 @@ pub struct DlocalPaymentsRequest {
     pub payer: Payer,
     pub card: Card,
     pub order_id: String,
+    pub three_dsecure: ThreeDSecure,
     pub notification_url: String,
+}
+
+#[derive(Default, Debug, Serialize, Eq, PartialEq)]
+pub struct ThreeDSecure {
+    force: bool
 }
 
 impl TryFrom<&types::PaymentsAuthorizeRouterData> for DlocalPaymentsRequest  {
@@ -41,6 +47,12 @@ impl TryFrom<&types::PaymentsAuthorizeRouterData> for DlocalPaymentsRequest  {
     fn try_from(item: &types::PaymentsAuthorizeRouterData) -> Result<Self,Self::Error> {
         match item.request.payment_method_data {
             api::PaymentMethod::Card(ref ccard) => {
+
+                use enums::AuthenticationType::*;
+                let three_dsecure = match item.auth_type {
+                    ThreeDs => true,
+                    NoThreeDs => false
+                };
                 let should_capture = matches!(
                     item.request.capture_method,
                     Some(enums::CaptureMethod::Automatic) | None
@@ -68,6 +80,7 @@ impl TryFrom<&types::PaymentsAuthorizeRouterData> for DlocalPaymentsRequest  {
                         capture: should_capture.to_string()
                     },
                     order_id : item.payment_id.clone(),
+                    three_dsecure: ThreeDSecure { force: three_dsecure },
                     notification_url : match &item.return_url {
                         Some (val) => val.to_string(),
                         None => "http://wwww.sandbox.juspay.in/hackathon/H1005".to_string()
@@ -210,8 +223,14 @@ impl From<DlocalPaymentStatus> for enums::AttemptStatus {
 // }
 #[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DlocalPaymentsResponse {
-    status: DlocalPaymentStatus,
-    id: String,
+    pub status: DlocalPaymentStatus,
+    pub three_dsecure: Option<ThreeDSecureResp>,
+    pub id: String,
+}
+
+#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ThreeDSecureResp {
+    pub redirect_url: String
 }
 
 impl<F,T> TryFrom<types::ResponseRouterData<F, DlocalPaymentsResponse, T, types::PaymentsResponseData>> for types::RouterData<F, T, types::PaymentsResponseData> {

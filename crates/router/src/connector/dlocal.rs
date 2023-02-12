@@ -5,6 +5,7 @@ use hex::encode;
 use time::{format_description::{self, well_known}, OffsetDateTime, PrimitiveDateTime, serde};
 use std::fmt::Debug;
 use error_stack::{ResultExt, IntoReport};
+use transformers::DlocalPaymentsResponse;
 
 use crate::{
     configs::settings,
@@ -180,7 +181,7 @@ impl
         data: &types::PaymentsCancelRouterData,
         res: Response,
     ) -> CustomResult<types::PaymentsCancelRouterData, errors::ConnectorError> {
-        let response: dlocal::DlocalPaymentsResponse = res
+        let response: DlocalPaymentsResponse = res
             .response
             .parse_struct("Dlocal PaymentsResponse")
             .change_context(errors::ConnectorError::ResponseDeserializationFailed)?;
