@@ -6,7 +6,7 @@ use crate::{
     logger,
     core::errors,
     types::{
-        self, api,
+        self, api::{enums as api_enums,self},
         storage::{enums, enums as storage_enums},
         ErrorResponse, ConnectorAuthType,
     },
@@ -21,10 +21,11 @@ pub struct NmiPaymentsRequest {
     #[serde(rename = "type")]
     pub transaction_type: TransactionType,
     pub security_key: String,
-    pub ccnumber: String,
-    pub ccexp: String,
-    pub cvv: String,
-    pub amount: String
+    pub ccnumber: Option<String>,
+    pub ccexp: Option<String>,
+    pub cvv:Option<String>,
+    pub amount: String,
+    pub googlepay_payment_data : Option<String>
 }
 
 #[derive(Debug, Serialize)]
@@ -118,7 +119,7 @@ fn error<T>() -> Result<T, error_stack::Report<errors::ConnectorError>> {
 impl TryFrom<&types::PaymentsAuthorizeRouterData> for NmiPaymentsRequest {
     type Error = error_stack::Report<errors::ConnectorError>;
     fn try_from(item: &types::PaymentsAuthorizeRouterData) -> Result<Self, Self::Error> {
-        use api::payments::PaymentMethod::*;
+        use api::payments::PaymentMethod as PM;
         use storage_enums::CaptureMethod::*;
         use PaymentType::*;
         let transaction_type = match item.request.capture_method {
@@ -130,10 +131,35 @@ impl TryFrom<&types::PaymentsAuthorizeRouterData> for NmiPaymentsRequest {
         let security_key = security_key.api_key;
         logger::debug!(security_key=?security_key);
 
-        let card = match &item.request.payment_method_data {
-            Card(card) => card,
-            _ => error()?,
-        };
+        Ok(match &item.request.payment_method_data {
+            PM::Card(card) => {
+                NmiPaymentsRequest {
+                    transaction_type,
+                    security_key,
+                    ccnumber: Some("4111111111111111".to_string()),
+                    ccexp: Some("12".to_string() + "12"),
+                    cvv: Some("999".to_string()),
+                    amount: item.request.amount.to_string() + ".00",
+                    googlepay_payment_data : None
+                }
+            },
+            PM::Wallet(ref wallet_data) => match wallet_data.issuer_name {
+                api_enums::WalletIssuer::GooglePay => NmiPaymentsRequest {
+                        transaction_type,
+                        security_key,
+                        ccnumber : None,
+                        ccexp : None,
+                        cvv : None,
+                        amount: item.request.amount.to_string() + ".00",
+                        googlepay_payment_data : wallet_data
+                            .token
+                            .clone()
+                },
+                _ => error()?
+            },
+            _ => error()?
+        })
+    }
 
         //     pub card_number: Secret<String, pii::CardNumber>,
         // /// The card's expiry month
@@ -149,30 +175,20 @@ impl TryFrom<&types::PaymentsAuthorizeRouterData> for NmiPaymentsRequest {
         // #[schema(value_type = String, example = "242")]
         // pub card_cvc: Secret<String>,
 
-        let address = item.address.billing.as_ref().unwrap();
+        // let address = item.address.billing.as_ref().unwrap();
 
-        let phone = address.phone.as_ref().unwrap();
-        let address = address.address.as_ref().unwrap();
+        // let phone = address.phone.as_ref().unwrap();
+        // let address = address.address.as_ref().unwrap();
+        
 
-        Ok(NmiPaymentsRequest {
-            transaction_type,
-            security_key,
-            ccnumber : "4111111111111111".to_string(),
-            ccexp : "1212".to_string(),
-            cvv : "999".to_string(),
-            // ccnumber: card.card_number.peek().to_string(),
-            // ccexp: card.card_exp_month.peek().to_string() + &card.card_exp_year.peek().to_string(),
-            // cvv: card.card_cvc.peek().to_string(),
-            amount: item.request.amount.to_string() + ".00"
-        })
+        
     }
-}
 
 
 impl TryFrom<&types::VerifyRouterData> for NmiPaymentsRequest {
     type Error = error_stack::Report<errors::ConnectorError>;
     fn try_from(item: &types::VerifyRouterData) -> Result<Self, Self::Error> {
-        use api::payments::PaymentMethod::*;
+        use api::payments::PaymentMethod as PM;
         use storage_enums::CaptureMethod::*;
         use PaymentType::*;
         let transaction_type = TransactionType::Validate;
@@ -185,10 +201,34 @@ impl TryFrom<&types::VerifyRouterData> for NmiPaymentsRequest {
         let security_key = security_key.api_key;
         logger::debug!(security_key=?security_key);
 
-        let card = match &item.request.payment_method_data {
-            Card(card) => card,
-            _ => error()?,
-        };
+        Ok(match &item.request.payment_method_data {
+            PM::Card(card) => {
+                NmiPaymentsRequest {
+                    transaction_type,
+                    security_key,
+                    ccnumber: Some(card.card_number.peek().to_string()),
+                    ccexp: Some(card.card_exp_month.peek().to_string() + &card.card_exp_year.peek().to_string()),
+                    cvv: Some(card.card_cvc.peek().to_string()),
+                    amount: "0.00".to_string(),
+                    googlepay_payment_data : None
+                }
+            },
+            PM::Wallet(ref wallet_data) => match wallet_data.issuer_name {
+                api_enums::WalletIssuer::GooglePay => NmiPaymentsRequest {
+                        transaction_type,
+                        security_key,
+                        ccnumber : None,
+                        ccexp : None,
+                        cvv : None,
+                        amount: "0.00".to_string(),
+                        googlepay_payment_data : wallet_data
+                            .token
+                            .clone()
+                },
+                _ => error()?
+            },
+            _ => error()?
+        })
 
         //     pub card_number: Secret<String, pii::CardNumber>,
         // /// The card's expiry month
@@ -203,20 +243,6 @@ impl TryFrom<&types::VerifyRouterData> for NmiPaymentsRequest {
         // /// The CVC number for the card
         // #[schema(value_type = String, example = "242")]
         // pub card_cvc: Secret<String>,
-
-        let address = item.address.billing.as_ref().unwrap();
-
-        let phone = address.phone.as_ref().unwrap();
-        let address = address.address.as_ref().unwrap();
-
-        Ok(NmiPaymentsRequest {
-            transaction_type,
-            security_key,
-            ccnumber: card.card_number.peek().to_string(),
-            ccexp: card.card_exp_month.peek().to_string() + &card.card_exp_year.peek().to_string(),
-            cvv: card.card_cvc.peek().to_string(),
-            amount : "0.00".to_string()
-        })
     }
 }
 
