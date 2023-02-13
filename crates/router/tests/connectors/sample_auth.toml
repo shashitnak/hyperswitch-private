@@ -48,3 +48,6 @@ api_secret = "MySecretKey"
 key1 = "Merchant Id"
 api_key = "API Key"
 api_secret = "API Secret Key"
+
+[nmi]
+api_key = "8Y3tHmW64sWDpcRdDGyeu2kek22Tx8Sm"
