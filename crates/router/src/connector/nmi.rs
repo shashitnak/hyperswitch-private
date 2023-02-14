@@ -3,8 +3,9 @@ mod transformers;
 use std::fmt::Debug;
 
 use error_stack::{IntoReport, ResultExt};
+use serde::Deserialize;
 use transformers as nmi;
-use serde::{Deserialize, Serialize};
+
 use crate::{
     configs::settings,
     core::{
@@ -18,25 +19,15 @@ use crate::{
         api::{self, ConnectorCommon, ConnectorCommonExt},
         ErrorResponse, Response,
     },
-    utils::{self, BytesExt}, connector::nmi::transformers::{NmiPaymentsRequest, NmiCaptureRequest},
+    utils,
 };
-
-use self::transformers::NmiSyncRequest;
 
 #[derive(Debug, Clone)]
 pub struct Nmi;
 
-impl<Flow, Request, Response> ConnectorCommonExt<Flow, Request, Response> for Nmi
-where
-    Self: ConnectorIntegration<Flow, Request, Response>,
+impl<Flow, Request, Response> ConnectorCommonExt<Flow, Request, Response> for Nmi where
+    Self: ConnectorIntegration<Flow, Request, Response>
 {
-    // fn build_headers(
-    //     &self,
-    //     _req: &types::RouterData<Flow, Request, Response>,
-    //     _connectors: &settings::Connectors,
-    // ) -> CustomResult<Vec<(String, String)>, errors::ConnectorError> {
-    //     todo!()
-    // }
 }
 
 impl ConnectorCommon for Nmi {
@@ -80,7 +71,7 @@ impl ConnectorIntegration<api::Verify, types::VerifyRequestData, types::Payments
     fn get_content_type(&self) -> &'static str {
         self.common_get_content_type()
     }
-    
+
     fn get_url(
         &self,
         _req: &types::VerifyRouterData,
@@ -92,100 +83,81 @@ impl ConnectorIntegration<api::Verify, types::VerifyRequestData, types::Payments
             "api/transact.php"
         ))
     }
-    
+
     fn get_request_body(
         &self,
         req: &types::VerifyRouterData,
     ) -> CustomResult<Option<String>, errors::ConnectorError> {
-
         let nmi_req = utils::Encode::<nmi::NmiPaymentsRequest>::convert_and_url_encode(req)
             .change_context(errors::ConnectorError::RequestEncodingFailed)?;
         Ok(Some(nmi_req))
     }
-    
+
     fn build_request(
         &self,
         req: &types::VerifyRouterData,
         connectors: &settings::Connectors,
     ) -> CustomResult<Option<services::Request>, errors::ConnectorError> {
-        let mut headers = types::PaymentsVerifyType::get_headers(
-                    self, req, connectors,
-                )?;
-        headers.push(("Content-Type".to_string(), "application/x-www-form-urlencoded".to_string()));
+        let mut headers = types::PaymentsVerifyType::get_headers(self, req, connectors)?;
+        headers.push((
+            "Content-Type".to_string(),
+            "application/x-www-form-urlencoded".to_string(),
+        ));
         let body = types::PaymentsVerifyType::get_request_body(self, req)?;
         logger::debug!(body=?body);
         Ok(Some(
             services::RequestBuilder::new()
                 .method(services::Method::Post)
-                .url(&types::PaymentsVerifyType::get_url(
-                    self, req, connectors,
-                )?)
+                .url(&types::PaymentsVerifyType::get_url(self, req, connectors)?)
                 .headers(headers)
                 .body(body)
                 .build(),
         ))
     }
-    
+
     fn handle_response(
         &self,
         data: &types::VerifyRouterData,
         res: Response,
     ) -> CustomResult<types::VerifyRouterData, errors::ConnectorError> {
         logger::debug!(payment_auth_response=?res);
-        let raw_string = res
-        .response
-        .into_iter()
-        .map(|x| x as char)
-        .collect::<String>();
-        // let items = raw_string
-        //     .split("&");
-        // let mut status = nmi::NmiPaymentStatus::Failed;
-        // let mut tid = "".to_string();
-
-        // for item in items {
-        //     let mut pair = item.split("=");
-        //     let key = pair.next().unwrap();
-        //     let val = pair.next().unwrap();
-        //     match key {
-        //         "response" => match val {
-        //             "1" => status = nmi::NmiPaymentStatus::Succeeded,
-        //             _ => ()
-        //         },
-        //         "transactionid" => tid = val.to_string(),
-        //         _ => ()
-        //     }
-        // }
-
-        use serde::Deserialize;
+        // let raw_string = res
+        //     .response
+        //     .into_iter()
+        //     .map(|x| x as char)
+        //     .collect::<String>();
 
         #[derive(Deserialize)]
         struct Response {
             response: usize,
             #[serde(rename = "type")]
             transaction_type: nmi::TransactionType,
-            transactionid: String
+            transactionid: String,
         }
 
-        let response: Response = serde_urlencoded::from_str(&raw_string).unwrap();
-        use nmi::TransactionType::*;
-        use nmi::NmiPaymentStatus::*;
-
-    //     Authorised,
-    // Captured,
-    // Failed,
-    // #[default]
-    // Processing,
-    // Settled
+        let response: Response = serde_urlencoded::from_bytes(&res.response)
+            .map_err(|_| errors::ConnectorError::ResponseHandlingFailed)?;
+        use nmi::{NmiPaymentStatus::*, TransactionType::*};
 
         let response = match response {
-            Response { response: 1, transaction_type: Validate, transactionid } => nmi::NmiPaymentsResponse { status: Captured, id: transactionid },
-            Response { response: _, transaction_type: _, transactionid } => nmi::NmiPaymentsResponse { status: Failed, id: transactionid }
+            Response {
+                response: 1,
+                transaction_type: Validate,
+                transactionid,
+            } => nmi::NmiPaymentsResponse {
+                status: Captured,
+                id: transactionid,
+            },
+            Response {
+                response: _,
+                transaction_type: _,
+                transactionid,
+            } => nmi::NmiPaymentsResponse {
+                status: Failed,
+                id: transactionid,
+            },
         };
 
-        // let response: nmi::NmiPaymentsResponse = res
-        //     .response
-        //     .parse_struct("PaymentIntentResponse")
-        //     .change_context(errors::ConnectorError::ResponseDeserializationFailed)?;
         logger::debug!(nmipayments_create_response=?response);
         types::ResponseRouterData {
             response,
@@ -216,7 +188,7 @@ impl ConnectorIntegration<api::Void, types::PaymentsCancelData, types::PaymentsR
 
     fn get_url(
         &self,
-        req: &types::PaymentsCancelRouterData,
+        _req: &types::PaymentsCancelRouterData,
         _connectors: &settings::Connectors,
     ) -> CustomResult<String, errors::ConnectorError> {
         Ok(format!(
@@ -244,10 +216,11 @@ impl ConnectorIntegration<api::Void, types::PaymentsCancelData, types::PaymentsR
         req: &types::PaymentsCancelRouterData,
         connectors: &settings::Connectors,
     ) -> CustomResult<Option<services::Request>, errors::ConnectorError> {
-        let mut headers = types::PaymentsVoidType::get_headers(
-            self, req, connectors,
-        )?;
-        headers.push(("Content-Type".to_string(), "application/x-www-form-urlencoded".to_string()));
+        let mut headers = types::PaymentsVoidType::get_headers(self, req, connectors)?;
+        headers.push((
+            "Content-Type".to_string(),
+            "application/x-www-form-urlencoded".to_string(),
+        ));
         let body = self.get_request_body(req)?;
 
         Ok(Some(
@@ -270,44 +243,29 @@ impl ConnectorIntegration<api::Void, types::PaymentsCancelData, types::PaymentsR
         #[derive(Deserialize)]
         struct Response {
             response: usize,
-            #[serde(rename = "type")]
-            transaction_type: nmi::TransactionType,
-            transactionid: String
+            transactionid: String,
         }
 
-        let raw_string: String = res.response.iter().map(|&x| x as char).collect();
-        let response: Response = serde_urlencoded::from_str(&raw_string).unwrap();
+        // let raw_string: String = res.response.iter().map(|&x| x as char).collect();
+        let response: Response = serde_urlencoded::from_bytes(&res.response)
+            .map_err(|_| errors::ConnectorError::ResponseHandlingFailed)?;
 
         let response = match response {
-            Response { response: 1, transaction_type: _, transactionid } =>
-                nmi::NmiPaymentsResponse { status: nmi::NmiPaymentStatus::Canceled, id: transactionid },
-            Response { response: _, transaction_type: _, transactionid } =>
-                nmi::NmiPaymentsResponse { status: nmi::NmiPaymentStatus::VoidFailed, id: transactionid }
+            Response {
+                response: 1,
+                transactionid,
+            } => nmi::NmiPaymentsResponse {
+                status: nmi::NmiPaymentStatus::Canceled,
+                id: transactionid,
+            },
+            Response {
+                response: _,
+                transactionid,
+            } => nmi::NmiPaymentsResponse {
+                status: nmi::NmiPaymentStatus::VoidFailed,
+                id: transactionid,
+            },
         };
-
-        // let raw_string = res
-        // .response
-        // .into_iter()
-        // .map(|x| x as char)
-        // .collect::<String>();
-        // let items = raw_string
-        //     .split("&");
-        // let mut status = nmi::NmiPaymentStatus::Failed;
-        // let mut tid = "".to_string();
-
-        // for item in items {
-        //     let mut pair = item.split("=");
-        //     let key = pair.next().unwrap();
-        //     let val = pair.next().unwrap();
-        //     match key {
-        //         "response" => match val {
-        //             "1" => status = nmi::NmiPaymentStatus::Succeeded,
-        //             _ => ()
-        //         },
-        //         "transactionid" => tid = val.to_string(),
-        //         _ => ()
-        //     }
-        // }
 
         logger::debug!(nmipayments_create_response=?response);
         types::ResponseRouterData {
@@ -355,11 +313,7 @@ impl ConnectorIntegration<api::PSync, types::PaymentsSyncData, types::PaymentsRe
         _req: &types::PaymentsSyncRouterData,
         _connectors: &settings::Connectors,
     ) -> CustomResult<String, errors::ConnectorError> {
-        Ok(format!(
-            "{}{}",
-            self.base_url(_connectors),
-            "api/query.php"
-        ))
+        Ok(format!("{}{}", self.base_url(_connectors), "api/query.php"))
     }
 
     fn get_request_body(
@@ -368,7 +322,8 @@ impl ConnectorIntegration<api::PSync, types::PaymentsSyncData, types::PaymentsRe
     ) -> CustomResult<Option<String>, errors::ConnectorError> {
         let auth = req.connector_auth_type.clone();
         let request = req.request.clone();
-        let nmi_req = NmiSyncRequest::try_from((&request, auth))?;
+        let nmi_req = nmi::NmiSyncRequest::try_from((&request, auth))?;
+
         let nmi_req = utils::Encode::<nmi::NmiSyncRequest>::encode(&nmi_req)
             .change_context(errors::ConnectorError::RequestEncodingFailed)?;
         logger::debug!(nmi_req=?nmi_req);
@@ -380,10 +335,11 @@ impl ConnectorIntegration<api::PSync, types::PaymentsSyncData, types::PaymentsRe
         req: &types::PaymentsSyncRouterData,
         connectors: &settings::Connectors,
     ) -> CustomResult<Option<services::Request>, errors::ConnectorError> {
-        let mut headers = types::PaymentsSyncType::get_headers(
-            self, req, connectors,
-        )?;
-        headers.push(("Content-Type".to_string(), "application/x-www-form-urlencoded".to_string()));
+        let mut headers = types::PaymentsSyncType::get_headers(self, req, connectors)?;
+        headers.push((
+            "Content-Type".to_string(),
+            "application/x-www-form-urlencoded".to_string(),
+        ));
         let body = self.get_request_body(req)?;
         Ok(Some(
             services::RequestBuilder::new()
@@ -391,7 +347,7 @@ impl ConnectorIntegration<api::PSync, types::PaymentsSyncData, types::PaymentsRe
                 .url(&types::PaymentsSyncType::get_url(self, req, connectors)?)
                 .headers(headers)
                 .body(body)
-                .build()
+                .build(),
         ))
     }
 
@@ -408,75 +364,53 @@ impl ConnectorIntegration<api::PSync, types::PaymentsSyncData, types::PaymentsRe
         res: Response,
     ) -> CustomResult<types::PaymentsSyncRouterData, errors::ConnectorError> {
         logger::debug!(payment_sync_response=?res);
-        // let sync_data = PaymentsSyncData {
-        //     connector_transaction_id = 
-        //     pub encoded_data: Option<String>,
-        //     pub capture_method: Option<storage_enums::CaptureMethod>,
-        // }
-
-        // use xmlparser::Tokenizer;
-        // #[derive(Debug, Deserialize)]
-        // struct Res {
-        //     nm_response: NmResponse
-        // }
-
-        // #[derive(Debug, Deserialize)]
-        // struct NmResponse {
-        //     transaction: Transaction
-        // }
-        
-        // #[derive(Debug, Deserialize)]
-        // struct Transaction {
-        //     transaction_id: String,
-        //     condition: nmi::NmiSyncResponseStatus
-        // }
         use regex::Regex;
 
-        let re1 = Regex::new("<transaction_id>(.*)</transaction_id>").unwrap();
-        let re2 = Regex::new("<condition>(.*)</condition>").unwrap();
+        let re1 = Regex::new("<transaction_id>(.*)</transaction_id>")
+            .map_err(|_| errors::ConnectorError::ResponseHandlingFailed)?;
+        let re2 = Regex::new("<condition>(.*)</condition>")
+            .map_err(|_| errors::ConnectorError::ResponseHandlingFailed)?;
 
         let mut transaction_id = None;
         let mut condition = None;
 
-        let raw_str: String = res.response.iter().map(|&x| x as char).collect();
+        let raw_str: String = res
+            .response
+            .iter()
+            .filter_map(|&x| {
+                let y: Option<char> = x.try_into().ok();
+                y
+            })
+            .collect();
 
         for tid in re1.captures_iter(&raw_str) {
-            transaction_id = Some((&tid[1]).to_string());
+            transaction_id = Some(tid[1].to_string());
             println!("transaction_id={transaction_id:?}");
         }
         use nmi::NmiSyncResponseStatus::*;
         for cid in re2.captures_iter(&raw_str) {
             condition = Some(match &cid[1] {
-                "pendingsettlement" => pendingSettlement,
-                "pending" => pending,
-                "failed" => failed,
-                "canceled" => canceled,
-                "complete" => complete,
-                _ => unknown
+                "pendingsettlement" => PendingSettlement,
+                "pending" => Pending,
+                "failed" => Failed,
+                "canceled" => Canceled,
+                "complete" => Complete,
+                _ => Unknown,
             });
             println!("condition={transaction_id:?}");
         }
-        // println!("bolaaaaaaa {:?}",raw_str);
-        //println!("tokenizer = {:?}", Tokenizer::from(raw_str.as_str()));
-        // let something= Tokenizer::from(raw_str.as_str());
-        // println!("something = {:?}", something);
-        // let transaction = response.nm_response.transaction;
         let sync_res = nmi::NmiSyncResponse {
-            condition: condition.unwrap(),
-            transaction_id: transaction_id.unwrap()
+            condition: condition.ok_or(errors::ConnectorError::ResponseHandlingFailed)?,
+            transaction_id: transaction_id.ok_or(errors::ConnectorError::ResponseHandlingFailed)?,
         };
         logger::debug!(sync_res=?sync_res);
 
-        // let response: nmi::NmiPaymentsResponse = res
-        //     .response
-        //     .parse_struct("nmi PaymentsResponse")
-        //     .change_context(errors::ConnectorError::ResponseDeserializationFailed)?;
-            types::RouterData::try_from(types::ResponseRouterData {
-                response: sync_res,
-                data: data.clone(),
-                http_code: res.status_code,
-            })
-            .change_context(errors::ConnectorError::ResponseHandlingFailed)
+        types::RouterData::try_from(types::ResponseRouterData {
+            response: sync_res,
+            data: data.clone(),
+            http_code: res.status_code,
+        })
+        .change_context(errors::ConnectorError::ResponseHandlingFailed)
     }
 }
 
@@ -498,7 +432,7 @@ impl ConnectorIntegration<api::Capture, types::PaymentsCaptureData, types::Payme
 
     fn get_url(
         &self,
-        req: &types::PaymentsCaptureRouterData,
+        _req: &types::PaymentsCaptureRouterData,
         _connectors: &settings::Connectors,
     ) -> CustomResult<String, errors::ConnectorError> {
         Ok(format!(
@@ -514,7 +448,8 @@ impl ConnectorIntegration<api::Capture, types::PaymentsCaptureData, types::Payme
     ) -> CustomResult<Option<String>, errors::ConnectorError> {
         let auth = req.connector_auth_type.clone();
         let request = req.request.clone();
-        let nmi_req = NmiCaptureRequest::try_from((&request, auth))?;
+        let nmi_req = nmi::NmiCaptureRequest::try_from((&request, auth))?;
+
         let nmi_req = utils::Encode::<nmi::NmiCaptureRequest>::encode(&nmi_req)
             .change_context(errors::ConnectorError::RequestEncodingFailed)?;
         logger::debug!(nmi_req=?nmi_req);
@@ -526,10 +461,11 @@ impl ConnectorIntegration<api::Capture, types::PaymentsCaptureData, types::Payme
         req: &types::PaymentsCaptureRouterData,
         connectors: &settings::Connectors,
     ) -> CustomResult<Option<services::Request>, errors::ConnectorError> {
-        let mut headers = types::PaymentsCaptureType::get_headers(
-            self, req, connectors,
-        )?;
-        headers.push(("Content-Type".to_string(), "application/x-www-form-urlencoded".to_string()));
+        let mut headers = types::PaymentsCaptureType::get_headers(self, req, connectors)?;
+        headers.push((
+            "Content-Type".to_string(),
+            "application/x-www-form-urlencoded".to_string(),
+        ));
         let body = self.get_request_body(req)?;
 
         Ok(Some(
@@ -552,44 +488,29 @@ impl ConnectorIntegration<api::Capture, types::PaymentsCaptureData, types::Payme
         #[derive(Deserialize)]
         struct Response {
             response: usize,
-            #[serde(rename = "type")]
-            transaction_type: nmi::TransactionType,
-            transactionid: String
+            transactionid: String,
         }
 
-        let raw_string: String = res.response.iter().map(|&x| x as char).collect();
-        let response: Response = serde_urlencoded::from_str(&raw_string).unwrap();
+        // let raw_string: String = res.response.iter().map(|&x| x as char).collect();
+        let response: Response = serde_urlencoded::from_bytes(&res.response)
+            .map_err(|_| errors::ConnectorError::ResponseHandlingFailed)?;
 
         let response = match response {
-            Response { response: 1, transaction_type: _, transactionid } =>
-                nmi::NmiPaymentsResponse { status: nmi::NmiPaymentStatus::Captured, id: transactionid },
-            Response { response: _, transaction_type: _, transactionid } =>
-                nmi::NmiPaymentsResponse { status: nmi::NmiPaymentStatus::Failed, id: transactionid }
+            Response {
+                response: 1,
+                transactionid,
+            } => nmi::NmiPaymentsResponse {
+                status: nmi::NmiPaymentStatus::Captured,
+                id: transactionid,
+            },
+            Response {
+                response: _,
+                transactionid,
+            } => nmi::NmiPaymentsResponse {
+                status: nmi::NmiPaymentStatus::Failed,
+                id: transactionid,
+            },
         };
-
-        // let raw_string = res
-        // .response
-        // .into_iter()
-        // .map(|x| x as char)
-        // .collect::<String>();
-        // let items = raw_string
-        //     .split("&");
-        // let mut status = nmi::NmiPaymentStatus::Failed;
-        // let mut tid = "".to_string();
-
-        // for item in items {
-        //     let mut pair = item.split("=");
-        //     let key = pair.next().unwrap();
-        //     let val = pair.next().unwrap();
-        //     match key {
-        //         "response" => match val {
-        //             "1" => status = nmi::NmiPaymentStatus::Succeeded,
-        //             _ => ()
-        //         },
-        //         "transactionid" => tid = val.to_string(),
-        //         _ => ()
-        //     }
-        // }
 
         logger::debug!(nmipayments_create_response=?response);
         types::ResponseRouterData {
@@ -614,7 +535,6 @@ impl api::PaymentSession for Nmi {}
 impl ConnectorIntegration<api::Session, types::PaymentsSessionData, types::PaymentsResponseData>
     for Nmi
 {
-    //TODO: implement sessions flow
 }
 
 impl api::PaymentAuthorize for Nmi {}
@@ -650,7 +570,6 @@ impl ConnectorIntegration<api::Authorize, types::PaymentsAuthorizeData, types::P
         &self,
         req: &types::PaymentsAuthorizeRouterData,
     ) -> CustomResult<Option<String>, errors::ConnectorError> {
-
         let nmi_req = utils::Encode::<nmi::NmiPaymentsRequest>::convert_and_url_encode(req)
             .change_context(errors::ConnectorError::RequestEncodingFailed)?;
         Ok(Some(nmi_req))
@@ -661,10 +580,11 @@ impl ConnectorIntegration<api::Authorize, types::PaymentsAuthorizeData, types::P
         req: &types::PaymentsAuthorizeRouterData,
         connectors: &settings::Connectors,
     ) -> CustomResult<Option<services::Request>, errors::ConnectorError> {
-        let mut headers = types::PaymentsAuthorizeType::get_headers(
-                    self, req, connectors,
-                )?;
-        headers.push(("Content-Type".to_string(), "application/x-www-form-urlencoded".to_string()));
+        let mut headers = types::PaymentsAuthorizeType::get_headers(self, req, connectors)?;
+        headers.push((
+            "Content-Type".to_string(),
+            "application/x-www-form-urlencoded".to_string(),
+        ));
         let body = types::PaymentsAuthorizeType::get_request_body(self, req)?;
         logger::debug!(body=?body);
         Ok(Some(
@@ -685,55 +605,49 @@ impl ConnectorIntegration<api::Authorize, types::PaymentsAuthorizeData, types::P
         res: Response,
     ) -> CustomResult<types::PaymentsAuthorizeRouterData, errors::ConnectorError> {
         logger::debug!(payment_auth_response=?res);
-        let raw_string = res
-        .response
-        .into_iter()
-        .map(|x| x as char)
-        .collect::<String>();
-        // let items = raw_string
-        //     .split("&");
-        // let mut status = nmi::NmiPaymentStatus::Failed;
-        // let mut tid = "".to_string();
-
-        // for item in items {
-        //     let mut pair = item.split("=");
-        //     let key = pair.next().unwrap();
-        //     let val = pair.next().unwrap();
-        //     match key {
-        //         "response" => match val {
-        //             "1" => status = nmi::NmiPaymentStatus::Succeeded,
-        //             _ => ()
-        //         },
-        //         "transactionid" => tid = val.to_string(),
-        //         _ => ()
-        //     }
-        // }
-
-        use serde::Deserialize;
+        // let raw_string = res
+        //     .response
+        //     .into_iter()
+        //     .map(|x| x as char)
+        //     .collect::<String>();
 
         #[derive(Deserialize)]
         struct Response {
             response: usize,
             #[serde(rename = "type")]
             transaction_type: nmi::TransactionType,
-            transactionid: String
+            transactionid: String,
         }
 
-        let response: Response = serde_urlencoded::from_str(&raw_string).unwrap();
-        use nmi::TransactionType::*;
-        use nmi::NmiPaymentStatus::*;
-
-    //     Authorised,
-    // Captured,
-    // Failed,
-    // #[default]
-    // Processing,
-    // Settled
+        let response: Response = serde_urlencoded::from_bytes(&res.response)
+            .map_err(|_| errors::ConnectorError::ResponseHandlingFailed)?;
+        use nmi::{NmiPaymentStatus::*, TransactionType::*};
 
         let response = match response {
-            Response { response: 1, transaction_type: Sale, transactionid } => nmi::NmiPaymentsResponse { status: Captured, id: transactionid },
-            Response { response: 1, transaction_type: Auth, transactionid } => nmi::NmiPaymentsResponse { status: Authorised, id: transactionid },
-            Response { response: _, transaction_type: _, transactionid } => nmi::NmiPaymentsResponse { status: Failed, id: transactionid }
+            Response {
+                response: 1,
+                transaction_type: Sale,
+                transactionid,
+            } => nmi::NmiPaymentsResponse {
+                status: Captured,
+                id: transactionid,
+            },
+            Response {
+                response: 1,
+                transaction_type: Auth,
+                transactionid,
+            } => nmi::NmiPaymentsResponse {
+                status: Authorised,
+                id: transactionid,
+            },
+            Response {
+                response: _,
+                transaction_type: _,
+                transactionid,
+            } => nmi::NmiPaymentsResponse {
+                status: Failed,
+                id: transactionid,
+            },
         };
 
         // let response: nmi::NmiPaymentsResponse = res
@@ -804,36 +718,32 @@ impl ConnectorIntegration<api::Execute, types::RefundsData, types::RefundsRespon
         req: &types::RefundsRouterData<api::Execute>,
         connectors: &settings::Connectors,
     ) -> CustomResult<Option<services::Request>, errors::ConnectorError> {
-
-        let mut headers = types::RefundExecuteType::get_headers(
-                    self, req, connectors,
-                )?;
-        headers.push(("Content-Type".to_string(), "application/x-www-form-urlencoded".to_string()));
+        let mut headers = types::RefundExecuteType::get_headers(self, req, connectors)?;
+        headers.push((
+            "Content-Type".to_string(),
+            "application/x-www-form-urlencoded".to_string(),
+        ));
         let body = types::RefundExecuteType::get_request_body(self, req)?;
         logger::debug!(body=?body);
         Ok(Some(
             services::RequestBuilder::new()
                 .method(services::Method::Post)
-                .url(&types::RefundExecuteType::get_url(
-                    self, req, connectors,
-                )?)
+                .url(&types::RefundExecuteType::get_url(self, req, connectors)?)
                 .headers(headers)
                 .body(body)
                 .build(),
         ))
     }
-        
-        
-        
-        // let request = services::RequestBuilder::new()
-        //     .method(services::Method::Post)
-        //     .url(&types::RefundExecuteType::get_url(self, req, connectors)?)
-        //     .headers(types::RefundExecuteType::get_headers(
-        //         self, req, connectors,
-        //     )?)
-        //     .body(types::RefundExecuteType::get_request_body(self, req)?)
-        //     .build();
-        // Ok(Some(request))
+
+    // let request = services::RequestBuilder::new()
+    //     .method(services::Method::Post)
+    //     .url(&types::RefundExecuteType::get_url(self, req, connectors)?)
+    //     .headers(types::RefundExecuteType::get_headers(
+    //         self, req, connectors,
+    //     )?)
+    //     .body(types::RefundExecuteType::get_request_body(self, req)?)
+    //     .build();
+    // Ok(Some(request))
     // }
 
     fn handle_response(
@@ -845,62 +755,37 @@ impl ConnectorIntegration<api::Execute, types::RefundsData, types::RefundsRespon
         #[derive(Deserialize)]
         struct Response {
             response: usize,
-            #[serde(rename = "type")]
-            transaction_type: nmi::TransactionType,
-            transactionid: String
+            transactionid: String,
         }
 
-        let raw_string: String = res.response.iter().map(|&x| x as char).collect();
-        let response: Response = serde_urlencoded::from_str(&raw_string).unwrap();
+        // let raw_string: String = res.response.iter().map(|&x| x as char).collect();
+        let response: Response = serde_urlencoded::from_bytes(&res.response)
+            .map_err(|_| errors::ConnectorError::ResponseHandlingFailed)?;
 
         use crate::types::storage::enums::RefundStatus;
 
-
         let response = match response {
-            Response { response: 1, transaction_type: _, transactionid } =>
-                types::RefundsResponseData {
-                    refund_status: RefundStatus::Success,
-                    connector_refund_id: transactionid
-                },
-            Response { response: _, transaction_type: _, transactionid } =>
-                types::RefundsResponseData {
-                    refund_status: RefundStatus::Failure,
-                    connector_refund_id: transactionid
-                },
+            Response {
+                response: 1,
+                transactionid,
+            } => types::RefundsResponseData {
+                refund_status: RefundStatus::Success,
+                connector_refund_id: transactionid,
+            },
+            Response {
+                response: _,
+                transactionid,
+            } => types::RefundsResponseData {
+                refund_status: RefundStatus::Failure,
+                connector_refund_id: transactionid,
+            },
         };
-
-        // let raw_string = res
-        // .response
-        // .into_iter()
-        // .map(|x| x as char)
-        // .collect::<String>();
-        // let items = raw_string
-        //     .split("&");
-        // let mut status = nmi::NmiPaymentStatus::Failed;
-        // let mut tid = "".to_string();
-
-        // for item in items {
-        //     let mut pair = item.split("=");
-        //     let key = pair.next().unwrap();
-        //     let val = pair.next().unwrap();
-        //     match key {
-        //         "response" => match val {
-        //             "1" => status = nmi::NmiPaymentStatus::Succeeded,
-        //             _ => ()
-        //         },
-        //         "transactionid" => tid = val.to_string(),
-        //         _ => ()
-        //     }
-        // }
 
         logger::debug!(nmipayments_create_response=?response);
         Ok(types::RefundsRouterData {
             response: Ok(response),
-            // http_code: res.status_code,
             ..data.clone()
         })
-        // .try_into()
-        // .change_context(errors::ConnectorError::ResponseHandlingFailed)
     }
 
     fn get_error_response(
@@ -953,37 +838,22 @@ impl ConnectorIntegration<api::RSync, types::RefundsData, types::RefundsResponse
         req: &types::RefundsRouterData<api::RSync>,
         connectors: &settings::Connectors,
     ) -> CustomResult<Option<services::Request>, errors::ConnectorError> {
-
-        let mut headers = types::RefundSyncType::get_headers(
-                    self, req, connectors,
-                )?;
-        headers.push(("Content-Type".to_string(), "application/x-www-form-urlencoded".to_string()));
+        let mut headers = types::RefundSyncType::get_headers(self, req, connectors)?;
+        headers.push((
+            "Content-Type".to_string(),
+            "application/x-www-form-urlencoded".to_string(),
+        ));
         let body = types::RefundSyncType::get_request_body(self, req)?;
         logger::debug!(body=?body);
         Ok(Some(
             services::RequestBuilder::new()
                 .method(services::Method::Post)
-                .url(&types::RefundSyncType::get_url(
-                    self, req, connectors,
-                )?)
+                .url(&types::RefundSyncType::get_url(self, req, connectors)?)
                 .headers(headers)
                 .body(body)
                 .build(),
         ))
     }
-        
-        
-        
-        // let request = services::RequestBuilder::new()
-        //     .method(services::Method::Post)
-        //     .url(&types::RefundExecuteType::get_url(self, req, connectors)?)
-        //     .headers(types::RefundExecuteType::get_headers(
-        //         self, req, connectors,
-        //     )?)
-        //     .body(types::RefundExecuteType::get_request_body(self, req)?)
-        //     .build();
-        // Ok(Some(request))
-    // }
 
     fn handle_response(
         &self,
@@ -994,98 +864,53 @@ impl ConnectorIntegration<api::RSync, types::RefundsData, types::RefundsResponse
 
         use regex::Regex;
 
-        let re1 = Regex::new("<transaction_id>(.*)</transaction_id>").unwrap();
-        let re2 = Regex::new("<condition>(.*)</condition>").unwrap();
+        let re1 = Regex::new("<transaction_id>(.*)</transaction_id>")
+            .map_err(|_| errors::ConnectorError::ResponseHandlingFailed)?;
+        let re2 = Regex::new("<condition>(.*)</condition>")
+            .map_err(|_| errors::ConnectorError::ResponseHandlingFailed)?;
 
-        let mut transaction_id = None;
-        let mut refund_status = None;
+        let raw_str: String = res
+            .response
+            .iter()
+            .filter_map(|&x| {
+                let y: Option<char> = x.try_into().ok();
+                y
+            })
+            .collect();
 
-        let raw_str: String = res.response.iter().map(|&x| x as char).collect();
+        let transaction_id = re1
+            .captures_iter(&raw_str)
+            .next()
+            .map(|x| x.get(1).map(|x| x.as_str().to_string()))
+            .flatten();
 
-        for tid in re1.captures_iter(&raw_str) {
-            transaction_id = Some((&tid[1]).to_string());
-            println!("transaction_id={transaction_id:?}");
-        }
+        println!("transaction_id={transaction_id:?}");
         use crate::types::storage::enums::RefundStatus::*;
-        for cid in re2.captures_iter(&raw_str) {
-            refund_status = Some(match &cid[1] {
+
+        let refund_status =  re2
+            .captures_iter(&raw_str) 
+            .next()
+            .map(|cid| cid.get(1).map(|x| match x.as_str() {
                 "pendingsettlement" => Success,
                 "pending" => Pending,
                 "failed" => Failure,
                 "complete" => Success,
-                _ => ManualReview
-            });
-            println!("condition={transaction_id:?}");
-        }
-        // println!("bolaaaaaaa {:?}",raw_str);
-        //println!("tokenizer = {:?}", Tokenizer::from(raw_str.as_str()));
-        // let something= Tokenizer::from(raw_str.as_str());
-        // println!("something = {:?}", something);
-        // let transaction = response.nm_response.transaction;
+                _ => ManualReview,
+            }))
+            .flatten();
+        println!("condition={refund_status:?}");
+
         let response = types::RefundsResponseData {
-            refund_status: refund_status.unwrap(),
-            connector_refund_id: transaction_id.unwrap()
+            refund_status: refund_status.ok_or(errors::ConnectorError::ResponseHandlingFailed)?,
+            connector_refund_id: transaction_id
+                .ok_or(errors::ConnectorError::ResponseHandlingFailed)?,
         };
-
-        // #[derive(Deserialize)]
-        // struct Response {
-        //     response: usize,
-        //     #[serde(rename = "type")]
-        //     transaction_type: nmi::TransactionType,
-        //     transactionid: String
-        // }
-
-        // let raw_string: String = res.response.iter().map(|&x| x as char).collect();
-        // let response: Response = serde_urlencoded::from_str(&raw_string).unwrap();
-
-        // use crate::types::storage::enums::RefundStatus;
-
-
-        // let response = match response {
-        //     Response { response: 1, transaction_type: _, transactionid } =>
-        //         types::RefundsResponseData {
-        //             refund_status: RefundStatus::Success,
-        //             connector_refund_id: transactionid
-        //         },
-        //     Response { response: _, transaction_type: _, transactionid } =>
-        //         types::RefundsResponseData {
-        //             refund_status: RefundStatus::Failure,
-        //             connector_refund_id: transactionid
-        //         },
-        // };
-
-        // let raw_string = res
-        // .response
-        // .into_iter()
-        // .map(|x| x as char)
-        // .collect::<String>();
-        // let items = raw_string
-        //     .split("&");
-        // let mut status = nmi::NmiPaymentStatus::Failed;
-        // let mut tid = "".to_string();
-
-        // for item in items {
-        //     let mut pair = item.split("=");
-        //     let key = pair.next().unwrap();
-        //     let val = pair.next().unwrap();
-        //     match key {
-        //         "response" => match val {
-        //             "1" => status = nmi::NmiPaymentStatus::Succeeded,
-        //             _ => ()
-        //         },
-        //         "transactionid" => tid = val.to_string(),
-        //         _ => ()
-        //     }
-        // }
 
         logger::debug!(nmipayments_create_response=?response);
         Ok(types::RefundsRouterData {
             response: Ok(response),
-            // http_code: res.status_code,
             ..data.clone()
         })
-        // .try_into()
-        // .change_context(errors::ConnectorError::ResponseHandlingFailed)
     }
 
     fn get_error_response(
