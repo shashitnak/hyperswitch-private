@@ -881,23 +881,20 @@ impl ConnectorIntegration<api::RSync, types::RefundsData, types::RefundsResponse
         let transaction_id = re1
             .captures_iter(&raw_str)
             .next()
-            .map(|x| x.get(1).map(|x| x.as_str().to_string()))
-            .flatten();
+            .and_then(|x| x.get(1).map(|x| x.as_str().to_string()));
 
         println!("transaction_id={transaction_id:?}");
         use crate::types::storage::enums::RefundStatus::*;
 
-        let refund_status =  re2
-            .captures_iter(&raw_str) 
-            .next()
-            .map(|cid| cid.get(1).map(|x| match x.as_str() {
+        let refund_status = re2.captures_iter(&raw_str).next().and_then(|cid| {
+            cid.get(1).map(|x| match x.as_str() {
                 "pendingsettlement" => Success,
                 "pending" => Pending,
                 "failed" => Failure,
                 "complete" => Success,
                 _ => ManualReview,
-            }))
-            .flatten();
+            })
+        });
         println!("condition={refund_status:?}");
 
         let response = types::RefundsResponseData {
