@@ -288,10 +288,7 @@ async fn should_fail_payment_for_incorrect_card_number() {
         )
         .await
         .unwrap();
-        assert_eq!(
-            response.status,
-            enums::AttemptStatus::Failure
-        );
+    assert_eq!(response.status, enums::AttemptStatus::Failure);
 }
 
 // Creates a payment with empty card number.
@@ -310,18 +307,13 @@ async fn should_fail_payment_for_empty_card_number() {
         )
         .await
         .unwrap();
-    assert_eq!(
-        response.status,
-        enums::AttemptStatus::Failure
-    );
+    assert_eq!(response.status, enums::AttemptStatus::Failure);
 }
 
 // Creates a payment with incorrect CVC.
 // #[actix_web::test]
 
-
 // NOT APPLICABLE, PROCESSOR MARKS TXN AS SUCCESSFULL WITH INCORRECT CVV
-
 
 // async fn should_fail_payment_for_incorrect_cvc() {
 //     let response = CONNECTOR
@@ -359,10 +351,7 @@ async fn should_fail_payment_for_invalid_exp_month() {
         )
         .await
         .unwrap();
-        assert_eq!(
-            response.status,
-            enums::AttemptStatus::Failure
-        );
+    assert_eq!(response.status, enums::AttemptStatus::Failure);
 }
 
 // Creates a payment with incorrect expiry year.
@@ -381,10 +370,7 @@ async fn should_fail_payment_for_incorrect_expiry_year() {
         )
         .await
         .unwrap();
-        assert_eq!(
-            response.status,
-            enums::AttemptStatus::Failure
-        );
+    assert_eq!(response.status, enums::AttemptStatus::Failure);
 }
 
 // Voids a payment using automatic capture flow (Non 3DS).
@@ -414,10 +400,7 @@ async fn should_fail_capture_for_invalid_payment() {
         .capture_payment("123456789".to_string(), None, None)
         .await
         .unwrap();
-    assert_eq!(
-        capture_response.status,
-        enums::AttemptStatus::Failure,
-    );
+    assert_eq!(capture_response.status, enums::AttemptStatus::Failure,);
 }
 
 // Refunds a payment with refund amount higher than payment amount.
@@ -434,10 +417,10 @@ async fn should_fail_for_refund_amount_higher_than_payment_amount() {
         )
         .await
         .unwrap();
-        assert_eq!(
-            response.response.unwrap().refund_status,
-            enums::RefundStatus::Failure,
-        );
+    assert_eq!(
+        response.response.unwrap().refund_status,
+        enums::RefundStatus::Failure,
+    );
 }
 
 // Connector dependent test cases goes here

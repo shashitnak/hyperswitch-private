@@ -629,7 +629,7 @@ pub enum RoutableConnectors {
     Stripe,
     Worldline,
     Worldpay,
-    Nmi
+    Nmi,
 }
 
 /// Wallets which support obtaining session object
