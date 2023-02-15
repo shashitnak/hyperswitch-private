@@ -60,12 +60,13 @@ pub enum PaymentType {
 }
 
 fn error(msg: &'static str) -> error_stack::Report<errors::ConnectorError> {
-    match Err(errors::ConnectorError::RequestEncodingFailedWithReason(
+    let result = Err(errors::ConnectorError::RequestEncodingFailedWithReason(
         msg.to_string(),
     ))
-    .into_report()
-    {
-        Ok(()) => panic!("Impossible"),
+    .into_report();
+
+    match result {
+        Ok(()) => error(msg), // This case will never match
         Err(err) => err,
     }
 }
@@ -189,9 +190,9 @@ pub struct NmiAuthType {
     pub(super) api_key: String,
 }
 
-impl TryFrom<&types::ConnectorAuthType> for NmiAuthType {
+impl TryFrom<&ConnectorAuthType> for NmiAuthType {
     type Error = error_stack::Report<errors::ConnectorError>;
-    fn try_from(auth_type: &types::ConnectorAuthType) -> Result<Self, Self::Error> {
+    fn try_from(auth_type: &ConnectorAuthType) -> Result<Self, Self::Error> {
         if let types::ConnectorAuthType::HeaderKey { api_key } = auth_type {
             Ok(Self {
                 api_key: api_key.to_string(),
@@ -391,4 +392,12 @@ impl From<RefundStatus> for enums::RefundStatus {
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq)]
 pub struct NmiErrorResponse {
     pub error_code: String,
+}
+
+#[derive(Deserialize)]
+pub struct GenericResponseType {
+    pub response: usize,
+    #[serde(rename = "type")]
+    pub transaction_type: TransactionType,
+    pub transactionid: String,
 }

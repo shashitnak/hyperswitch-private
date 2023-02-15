@@ -3,7 +3,6 @@ mod transformers;
 use std::fmt::Debug;
 
 use error_stack::{IntoReport, ResultExt};
-use serde::Deserialize;
 use transformers as nmi;
 
 use crate::{
@@ -121,19 +120,8 @@ impl ConnectorIntegration<api::Verify, types::VerifyRequestData, types::Payments
         res: Response,
     ) -> CustomResult<types::VerifyRouterData, errors::ConnectorError> {
         logger::debug!(payment_auth_response=?res);
-        // let raw_string = res
-        //     .response
-        //     .into_iter()
-        //     .map(|x| x as char)
-        //     .collect::<String>();
 
-        #[derive(Deserialize)]
-        struct Response {
-            response: usize,
-            #[serde(rename = "type")]
-            transaction_type: nmi::TransactionType,
-            transactionid: String,
-        }
+        type Response = nmi::GenericResponseType;
 
         let response: Response = serde_urlencoded::from_bytes(&res.response)
             .map_err(|_| errors::ConnectorError::ResponseHandlingFailed)?;
@@ -240,13 +228,8 @@ impl ConnectorIntegration<api::Void, types::PaymentsCancelData, types::PaymentsR
     ) -> CustomResult<types::PaymentsCancelRouterData, errors::ConnectorError> {
         logger::debug!(payment_auth_response=?res);
 
-        #[derive(Deserialize)]
-        struct Response {
-            response: usize,
-            transactionid: String,
-        }
+        type Response = nmi::GenericResponseType;
 
-        // let raw_string: String = res.response.iter().map(|&x| x as char).collect();
         let response: Response = serde_urlencoded::from_bytes(&res.response)
             .map_err(|_| errors::ConnectorError::ResponseHandlingFailed)?;
 
@@ -254,6 +237,7 @@ impl ConnectorIntegration<api::Void, types::PaymentsCancelData, types::PaymentsR
             Response {
                 response: 1,
                 transactionid,
+                ..
             } => nmi::NmiPaymentsResponse {
                 status: nmi::NmiPaymentStatus::Canceled,
                 id: transactionid,
@@ -261,6 +245,7 @@ impl ConnectorIntegration<api::Void, types::PaymentsCancelData, types::PaymentsR
             Response {
                 response: _,
                 transactionid,
+                ..
             } => nmi::NmiPaymentsResponse {
                 status: nmi::NmiPaymentStatus::VoidFailed,
                 id: transactionid,
@@ -485,13 +470,8 @@ impl ConnectorIntegration<api::Capture, types::PaymentsCaptureData, types::Payme
     ) -> CustomResult<types::PaymentsCaptureRouterData, errors::ConnectorError> {
         logger::debug!(payment_auth_response=?res);
 
-        #[derive(Deserialize)]
-        struct Response {
-            response: usize,
-            transactionid: String,
-        }
+        type Response = nmi::GenericResponseType;
 
-        // let raw_string: String = res.response.iter().map(|&x| x as char).collect();
         let response: Response = serde_urlencoded::from_bytes(&res.response)
             .map_err(|_| errors::ConnectorError::ResponseHandlingFailed)?;
 
@@ -499,6 +479,7 @@ impl ConnectorIntegration<api::Capture, types::PaymentsCaptureData, types::Payme
             Response {
                 response: 1,
                 transactionid,
+                ..
             } => nmi::NmiPaymentsResponse {
                 status: nmi::NmiPaymentStatus::Captured,
                 id: transactionid,
@@ -506,6 +487,7 @@ impl ConnectorIntegration<api::Capture, types::PaymentsCaptureData, types::Payme
             Response {
                 response: _,
                 transactionid,
+                ..
             } => nmi::NmiPaymentsResponse {
                 status: nmi::NmiPaymentStatus::Failed,
                 id: transactionid,
@@ -605,19 +587,8 @@ impl ConnectorIntegration<api::Authorize, types::PaymentsAuthorizeData, types::P
         res: Response,
     ) -> CustomResult<types::PaymentsAuthorizeRouterData, errors::ConnectorError> {
         logger::debug!(payment_auth_response=?res);
-        // let raw_string = res
-        //     .response
-        //     .into_iter()
-        //     .map(|x| x as char)
-        //     .collect::<String>();
 
-        #[derive(Deserialize)]
-        struct Response {
-            response: usize,
-            #[serde(rename = "type")]
-            transaction_type: nmi::TransactionType,
-            transactionid: String,
-        }
+        type Response = nmi::GenericResponseType;
 
         let response: Response = serde_urlencoded::from_bytes(&res.response)
             .map_err(|_| errors::ConnectorError::ResponseHandlingFailed)?;
@@ -640,20 +611,12 @@ impl ConnectorIntegration<api::Authorize, types::PaymentsAuthorizeData, types::P
                 status: Authorised,
                 id: transactionid,
             },
-            Response {
-                response: _,
-                transaction_type: _,
-                transactionid,
-            } => nmi::NmiPaymentsResponse {
+            Response { transactionid, .. } => nmi::NmiPaymentsResponse {
                 status: Failed,
                 id: transactionid,
             },
         };
 
-        // let response: nmi::NmiPaymentsResponse = res
-        //     .response
-        //     .parse_struct("PaymentIntentResponse")
-        //     .change_context(errors::ConnectorError::ResponseDeserializationFailed)?;
         logger::debug!(nmipayments_create_response=?response);
         types::ResponseRouterData {
             response,
@@ -752,13 +715,9 @@ impl ConnectorIntegration<api::Execute, types::RefundsData, types::RefundsRespon
         res: Response,
     ) -> CustomResult<types::RefundsRouterData<api::Execute>, errors::ConnectorError> {
         logger::debug!(target: "router::connector::nmi", response=?res);
-        #[derive(Deserialize)]
-        struct Response {
-            response: usize,
-            transactionid: String,
-        }
 
-        // let raw_string: String = res.response.iter().map(|&x| x as char).collect();
+        type Response = nmi::GenericResponseType;
+
         let response: Response = serde_urlencoded::from_bytes(&res.response)
             .map_err(|_| errors::ConnectorError::ResponseHandlingFailed)?;
 
@@ -768,14 +727,12 @@ impl ConnectorIntegration<api::Execute, types::RefundsData, types::RefundsRespon
             Response {
                 response: 1,
                 transactionid,
+                ..
             } => types::RefundsResponseData {
                 refund_status: RefundStatus::Success,
                 connector_refund_id: transactionid,
             },
-            Response {
-                response: _,
-                transactionid,
-            } => types::RefundsResponseData {
+            Response { transactionid, .. } => types::RefundsResponseData {
                 refund_status: RefundStatus::Failure,
                 connector_refund_id: transactionid,
             },
