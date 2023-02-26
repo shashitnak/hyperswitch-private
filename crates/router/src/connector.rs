@@ -21,6 +21,6 @@ pub mod worldpay;
 pub use self::{
     aci::Aci, adyen::Adyen, applepay::Applepay, authorizedotnet::Authorizedotnet,
     braintree::Braintree, checkout::Checkout, cybersource::Cybersource, dlocal::Dlocal,
-    fiserv::Fiserv, globalpay::Globalpay, klarna::Klarna, nmi::Nmi, payu::Payu, rapyd::Rapyd, shift4::Shift4,
-    stripe::Stripe, worldline::Worldline, worldpay::Worldpay,
+    fiserv::Fiserv, globalpay::Globalpay, klarna::Klarna, nmi::Nmi, payu::Payu, rapyd::Rapyd,
+    shift4::Shift4, stripe::Stripe, worldline::Worldline, worldpay::Worldpay,
 };
