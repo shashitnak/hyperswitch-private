@@ -13,7 +13,6 @@ use crate::{
         errors::{self, CustomResult},
         payments,
     },
-    logger,
     services::{self, ConnectorIntegration},
     types::{
         self,
@@ -282,7 +281,7 @@ impl ConnectorIntegration<api::PSync, types::PaymentsSyncData, types::PaymentsRe
             .parse_struct("NMI QueryResponse")
             .change_context(errors::ConnectorError::ResponseDeserializationFailed)?;
         types::ResponseRouterData {
-            response: response,
+            response,
             data: data.clone(),
             http_code: res.status_code,
         }
@@ -331,7 +330,6 @@ impl ConnectorIntegration<api::Capture, types::PaymentsCaptureData, types::Payme
 
         let nmi_req = utils::Encode::<nmi::NmiCaptureRequest>::encode(&nmi_req)
             .change_context(errors::ConnectorError::RequestEncodingFailed)?;
-        logger::debug!(nmi_req=?nmi_req);
         Ok(Some(nmi_req))
     }
 
@@ -393,11 +391,7 @@ impl ConnectorIntegration<api::Void, types::PaymentsCancelData, types::PaymentsR
         _req: &types::PaymentsCancelRouterData,
         connectors: &settings::Connectors,
     ) -> CustomResult<String, errors::ConnectorError> {
-        Ok(format!(
-            "{}{}",
-            self.base_url(connectors),
-            "api/transact.php"
-        ))
+        Ok(format!("{}api/transact.php", self.base_url(connectors)))
     }
 
     fn get_request_body(
@@ -409,7 +403,6 @@ impl ConnectorIntegration<api::Void, types::PaymentsCancelData, types::PaymentsR
         let nmi_req = nmi::NmiCancelRequest::try_from((&request, auth))?;
         let nmi_req = utils::Encode::<nmi::NmiCancelRequest>::encode(&nmi_req)
             .change_context(errors::ConnectorError::RequestEncodingFailed)?;
-        logger::debug!(nmi_req=?nmi_req);
         Ok(Some(nmi_req))
     }
 

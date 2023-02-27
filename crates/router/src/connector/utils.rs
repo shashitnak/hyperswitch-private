@@ -1,5 +1,9 @@
+use std::collections::HashMap;
+
 use error_stack::{report, IntoReport, ResultExt};
 use masking::Secret;
+use once_cell::sync::Lazy;
+use storage_models::enums::Currency;
 
 use crate::{
     core::errors::{self, CustomResult},
@@ -199,4 +203,27 @@ pub fn get_header_key_value<'a>(
         .ok_or(report!(
             errors::ConnectorError::WebhookSourceVerificationFailed
         ))?
+}
+
+static DENOMINATION: Lazy<HashMap<Currency, i32>> = Lazy::new(|| {
+    let mut map = HashMap::new();
+    map.insert(Currency::INR, 100);
+    map.insert(Currency::USD, 100);
+    map
+});
+
+pub fn convert_to_higher_denomination(
+    amount: i64,
+    currency: Currency,
+) -> Result<f64, error_stack::Report<errors::ConnectorError>> {
+    let factor = match DENOMINATION.get(&currency) {
+        Some(factor) => Ok(factor),
+        None => Err(errors::ConnectorError::NotImplemented(
+            "Payment Currency".to_string(),
+        )),
+    }?;
+    let amount_u32 = u32::try_from(amount)
+        .into_report()
+        .change_context(errors::ConnectorError::RequestEncodingFailed)?;
+    Ok(f64::from(amount_u32) / f64::from(*factor))
 }
