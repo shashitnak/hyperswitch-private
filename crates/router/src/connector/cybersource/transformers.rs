@@ -4,7 +4,7 @@ use masking::Secret;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    connector::utils::{self, AddressDetailsData, PaymentsRequestData, PhoneDetailsData},
+    connector::utils::{self, AddressDetailsData, PhoneDetailsData, RouterData},
     consts,
     core::errors,
     pii::PeekInterface,
@@ -108,7 +108,7 @@ impl TryFrom<&types::PaymentsAuthorizeRouterData> for CybersourcePaymentsRequest
     type Error = error_stack::Report<errors::ConnectorError>;
     fn try_from(item: &types::PaymentsAuthorizeRouterData) -> Result<Self, Self::Error> {
         match item.request.payment_method_data.clone() {
-            api::PaymentMethod::Card(ccard) => {
+            api::PaymentMethodData::Card(ccard) => {
                 let phone = item.get_billing_phone()?;
                 let phone_number = phone.get_number()?;
                 let country_code = phone.get_country_code()?;

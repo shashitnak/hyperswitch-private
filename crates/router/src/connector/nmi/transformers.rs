@@ -90,10 +90,10 @@ impl TryFrom<&types::PaymentsAuthorizeRouterData> for NmiPaymentsRequest {
 }
 
 fn get_payment_type(
-    payment_method: &api::PaymentMethod,
+    payment_method: &api::PaymentMethodData,
 ) -> Result<PaymentType, errors::ConnectorError> {
     match payment_method {
-        api::PaymentMethod::Card(card) => {
+        api::PaymentMethodData::Card(card) => {
             let expiry_year = card.card_exp_year.peek().clone();
             let secret_value = format!(
                 "{}{}",

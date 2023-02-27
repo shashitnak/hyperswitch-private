@@ -3,12 +3,11 @@ use std::collections::HashMap;
 use error_stack::{report, IntoReport, ResultExt};
 use masking::Secret;
 use once_cell::sync::Lazy;
-use storage_models::enums::Currency;
 
 use crate::{
     core::errors::{self, CustomResult},
     pii::PeekInterface,
-    types::{self, api},
+    types::{self, api, PaymentsCancelData},
     utils::OptionExt,
 };
 
@@ -38,13 +37,35 @@ impl AccessTokenRequestInfo for types::RefreshTokenRouterData {
     }
 }
 
-pub trait PaymentsRequestData {
+pub trait RouterData {
     fn get_billing(&self) -> Result<&api::Address, Error>;
     fn get_billing_country(&self) -> Result<String, Error>;
     fn get_billing_phone(&self) -> Result<&api::PhoneDetails, Error>;
+    fn get_connector_meta(&self) -> Result<serde_json::Value, Error>;
+    fn get_session_token(&self) -> Result<String, Error>;
     fn get_billing_address(&self) -> Result<&api::AddressDetails, Error>;
+    fn to_connector_meta<T>(&self) -> Result<T, Error>
+    where
+        T: serde::de::DeserializeOwned;
+}
+
+pub trait PaymentsRequestData {
     fn get_card(&self) -> Result<api::Card, Error>;
     fn get_return_url(&self) -> Result<String, Error>;
+}
+
+pub trait PaymentsCancelRequestData {
+    fn get_amount(&self) -> Result<i64, Error>;
+    fn get_currency(&self) -> Result<storage_models::enums::Currency, Error>;
+}
+
+impl PaymentsCancelRequestData for PaymentsCancelData {
+    fn get_amount(&self) -> Result<i64, Error> {
+        self.amount.ok_or_else(missing_field_err("amount"))
+    }
+    fn get_currency(&self) -> Result<storage_models::enums::Currency, Error> {
+        self.currency.ok_or_else(missing_field_err("currency"))
+    }
 }
 
 pub trait RefundsRequestData {
@@ -60,7 +81,7 @@ impl RefundsRequestData for types::RefundsData {
     }
 }
 
-impl PaymentsRequestData for types::PaymentsAuthorizeRouterData {
+impl<Flow, Request, Response> RouterData for types::RouterData<Flow, Request, Response> {
     fn get_billing_country(&self) -> Result<String, Error> {
         self.address
             .billing
@@ -68,13 +89,6 @@ impl PaymentsRequestData for types::PaymentsAuthorizeRouterData {
             .and_then(|a| a.address.as_ref())
             .and_then(|ad| ad.country.clone())
             .ok_or_else(missing_field_err("billing.address.country"))
-    }
-
-    fn get_card(&self) -> Result<api::Card, Error> {
-        match self.request.payment_method_data.clone() {
-            api::PaymentMethod::Card(card) => Ok(card),
-            _ => Err(missing_field_err("card")()),
-        }
     }
 
     fn get_billing_phone(&self) -> Result<&api::PhoneDetails, Error> {
@@ -98,10 +112,39 @@ impl PaymentsRequestData for types::PaymentsAuthorizeRouterData {
             .ok_or_else(missing_field_err("billing"))
     }
 
+    fn get_connector_meta(&self) -> Result<serde_json::Value, Error> {
+        self.connector_meta_data
+            .clone()
+            .ok_or_else(missing_field_err("connector_meta_data"))
+    }
+
+    fn get_session_token(&self) -> Result<String, Error> {
+        self.session_token
+            .clone()
+            .ok_or_else(missing_field_err("session_token"))
+    }
+
+    fn to_connector_meta<T>(&self) -> Result<T, Error>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        serde_json::from_value::<T>(self.get_connector_meta()?)
+            .into_report()
+            .change_context(errors::ConnectorError::NoConnectorMetaData)
+    }
+}
+
+impl PaymentsRequestData for types::PaymentsAuthorizeRouterData {
     fn get_return_url(&self) -> Result<String, Error> {
         self.router_return_url
             .clone()
             .ok_or_else(missing_field_err("router_return_url"))
+    }
+    fn get_card(&self) -> Result<api::Card, Error> {
+        match self.request.payment_method_data.clone() {
+            api::PaymentMethodData::Card(card) => Ok(card),
+            _ => Err(missing_field_err("card")()),
+        }
     }
 }
 
@@ -205,16 +248,16 @@ pub fn get_header_key_value<'a>(
         ))?
 }
 
-static DENOMINATION: Lazy<HashMap<Currency, i32>> = Lazy::new(|| {
+static DENOMINATION: Lazy<HashMap<storage_models::enums::Currency, i32>> = Lazy::new(|| {
     let mut map = HashMap::new();
-    map.insert(Currency::INR, 100);
-    map.insert(Currency::USD, 100);
+    map.insert(storage_models::enums::Currency::INR, 100);
+    map.insert(storage_models::enums::Currency::USD, 100);
     map
 });
 
 pub fn convert_to_higher_denomination(
     amount: i64,
-    currency: Currency,
+    currency: storage_models::enums::Currency,
 ) -> Result<f64, error_stack::Report<errors::ConnectorError>> {
     let factor = match DENOMINATION.get(&currency) {
         Some(factor) => Ok(factor),
