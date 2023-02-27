@@ -314,9 +314,8 @@ impl ConnectorIntegration<api::Capture, types::PaymentsCaptureData, types::Payme
         connectors: &settings::Connectors,
     ) -> CustomResult<String, errors::ConnectorError> {
         Ok(format!(
-            "{}{}",
-            self.base_url(connectors),
-            "api/transact.php"
+            "{}api/transact.php",
+            self.base_url(connectors)
         ))
     }
 
@@ -461,9 +460,8 @@ impl ConnectorIntegration<api::Execute, types::RefundsData, types::RefundsRespon
         connectors: &settings::Connectors,
     ) -> CustomResult<String, errors::ConnectorError> {
         Ok(format!(
-            "{}/{}",
-            self.base_url(connectors),
-            "api/transact.php"
+            "{}api/transact.php",
+            self.base_url(connectors)
         ))
     }
 
@@ -535,7 +533,7 @@ impl ConnectorIntegration<api::RSync, types::RefundsData, types::RefundsResponse
         _req: &types::RefundsRouterData<api::RSync>,
         connectors: &settings::Connectors,
     ) -> CustomResult<String, errors::ConnectorError> {
-        Ok(format!("{}/{}", self.base_url(connectors), "api/query.php"))
+        Ok(format!("{}api/query.php", self.base_url(connectors)))
     }
 
     fn get_request_body(
