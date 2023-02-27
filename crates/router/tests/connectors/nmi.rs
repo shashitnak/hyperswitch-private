@@ -312,29 +312,9 @@ async fn should_fail_payment_for_empty_card_number() {
 }
 
 // Creates a payment with incorrect CVC.
-// #[actix_web::test]
-
-// NOT APPLICABLE, PROCESSOR MARKS TXN AS SUCCESSFULL WITH INCORRECT CVV
-
-// async fn should_fail_payment_for_incorrect_cvc() {
-//     let response = CONNECTOR
-//         .make_payment(
-//             Some(types::PaymentsAuthorizeData {
-//                 payment_method_data: types::api::PaymentMethod::Card(api::Card {
-//                     card_cvc: Secret::new("12345".to_string()),
-//                     ..utils::CCardType::default().0
-//                 }),
-//                 ..utils::PaymentAuthorizeType::default().0
-//             }),
-//             None,
-//         )
-//         .await
-//         .unwrap();
-//     assert_eq!(
-//         response.response.unwrap_err().message,
-//         "Your card's security code is invalid.".to_string(),
-//     );
-// }
+#[ignore = "Connector returns SUCCESS status in case of invalid CVC"]
+#[actix_web::test]
+async fn should_fail_payment_for_incorrect_cvc() {}
 
 // Creates a payment with incorrect expiry month.
 #[actix_web::test]
@@ -375,24 +355,18 @@ async fn should_fail_payment_for_incorrect_expiry_year() {
 }
 
 // Voids a payment using automatic capture flow (Non 3DS).
-
-// INVALID TEST CASE, PG RETURNS SUCCESS ON VOID FOR CAPTURED TXNS
-
-// #[actix_web::test]
-// async fn should_fail_void_payment_for_auto_capture() {
-//     let authorize_response = CONNECTOR.make_payment(None, None).await.unwrap();
-//     assert_eq!(authorize_response.status, enums::AttemptStatus::Charged);
-//     let txn_id = utils::get_connector_transaction_id(authorize_response.response);
-//     assert_ne!(txn_id, None, "Empty connector transaction id");
-//     let void_response = CONNECTOR
-//         .void_payment(txn_id.unwrap(), None, None)
-//         .await
-//         .unwrap();
-//     assert_eq!(
-//         void_response.status,
-//         enums::AttemptStatus::VoidFailed
-//     );
-// }
+#[actix_web::test]
+async fn should_fail_void_payment_for_auto_capture() {
+    let authorize_response = CONNECTOR.make_payment(None, None).await.unwrap();
+    assert_eq!(authorize_response.status, enums::AttemptStatus::Charged);
+    let txn_id = utils::get_connector_transaction_id(authorize_response.response);
+    assert_ne!(txn_id, None, "Empty connector transaction id");
+    let void_response = CONNECTOR
+        .void_payment(txn_id.unwrap(), None, None)
+        .await
+        .unwrap();
+    assert_eq!(void_response.status, enums::AttemptStatus::VoidFailed);
+}
 
 // Captures a payment using invalid connector payment id.
 #[actix_web::test]
@@ -423,7 +397,3 @@ async fn should_fail_for_refund_amount_higher_than_payment_amount() {
         enums::RefundStatus::Failure,
     );
 }
-
-// Connector dependent test cases goes here
-
-// [#478]: add unit tests for non 3DS, wallets & webhooks in connector tests
