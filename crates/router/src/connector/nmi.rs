@@ -2,10 +2,10 @@ mod transformers;
 
 use std::fmt::Debug;
 
-use common_utils::ext_traits::ByteSliceExt;
 use error_stack::{IntoReport, ResultExt};
 use transformers as nmi;
 
+use self::transformers::{get_attempt_status, get_refund_status};
 use crate::{
     configs::settings,
     consts,
@@ -250,8 +250,7 @@ impl ConnectorIntegration<api::PSync, types::PaymentsSyncData, types::PaymentsRe
         &self,
         req: &types::PaymentsSyncRouterData,
     ) -> CustomResult<Option<String>, errors::ConnectorError> {
-        let connector_req = nmi::NmiSyncRequest::try_from(req)?;
-        let nmi_req = utils::Encode::<nmi::NmiSyncRequest>::encode(&connector_req)
+        let nmi_req = utils::Encode::<nmi::NmiSyncRequest>::convert_and_url_encode(req)
             .change_context(errors::ConnectorError::RequestEncodingFailed)?;
         Ok(Some(nmi_req))
     }
@@ -276,9 +275,25 @@ impl ConnectorIntegration<api::PSync, types::PaymentsSyncData, types::PaymentsRe
         data: &types::PaymentsSyncRouterData,
         res: types::Response,
     ) -> CustomResult<types::PaymentsSyncRouterData, errors::ConnectorError> {
-        let response: nmi::QueryResponse = res
-            .response
-            .parse_struct("NMI QueryResponse")
+        let query_response = String::from_utf8(res.response.to_vec())
+            .into_report()
+            .change_context(errors::ConnectorError::ResponseDeserializationFailed)?;
+        let (transaction_id, condition) = transformers::get_query_info(query_response)?;
+        Ok(types::PaymentsSyncRouterData {
+            status: get_attempt_status(condition, data.request.capture_method)?,
+            response: Ok(types::PaymentsResponseData::TransactionResponse {
+                resource_id: types::ResponseId::ConnectorTransactionId(transaction_id),
+                redirection_data: None,
+                mandate_reference: None,
+                connector_metadata: None,
+            }),
+            ..data.clone()
+        })
+
+        /* To do implement xml deserialization for QueryResponse in PSync and RSync flow
+        response_string.parse().unwrap();
+        let response: nmi::QueryResponse = (response_string.as_str())
+            .into_report()
             .change_context(errors::ConnectorError::ResponseDeserializationFailed)?;
         types::ResponseRouterData {
             response,
@@ -287,6 +302,7 @@ impl ConnectorIntegration<api::PSync, types::PaymentsSyncData, types::PaymentsRe
         }
         .try_into()
         .change_context(errors::ConnectorError::ResponseHandlingFailed)
+        */
     }
 
     fn get_error_response(
@@ -313,10 +329,7 @@ impl ConnectorIntegration<api::Capture, types::PaymentsCaptureData, types::Payme
         _req: &types::PaymentsCaptureRouterData,
         connectors: &settings::Connectors,
     ) -> CustomResult<String, errors::ConnectorError> {
-        Ok(format!(
-            "{}api/transact.php",
-            self.base_url(connectors)
-        ))
+        Ok(format!("{}api/transact.php", self.base_url(connectors)))
     }
 
     fn get_request_body(
@@ -459,10 +472,7 @@ impl ConnectorIntegration<api::Execute, types::RefundsData, types::RefundsRespon
         _req: &types::RefundsRouterData<api::Execute>,
         connectors: &settings::Connectors,
     ) -> CustomResult<String, errors::ConnectorError> {
-        Ok(format!(
-            "{}api/transact.php",
-            self.base_url(connectors)
-        ))
+        Ok(format!("{}api/transact.php", self.base_url(connectors)))
     }
 
     fn get_request_body(
@@ -540,10 +550,7 @@ impl ConnectorIntegration<api::RSync, types::RefundsData, types::RefundsResponse
         &self,
         req: &types::RefundsRouterData<api::RSync>,
     ) -> CustomResult<Option<String>, errors::ConnectorError> {
-        let auth = req.connector_auth_type.clone();
-        let request = req.request.clone();
-        let nmi_req = nmi::NmiRefundRequest::try_from((&request, auth))?;
-        let nmi_req = utils::Encode::<nmi::NmiRefundRequest>::encode(&nmi_req)
+        let nmi_req = utils::Encode::<nmi::NmiSyncRequest>::convert_and_url_encode(req)
             .change_context(errors::ConnectorError::RequestEncodingFailed)?;
         Ok(Some(nmi_req))
     }
@@ -568,6 +575,20 @@ impl ConnectorIntegration<api::RSync, types::RefundsData, types::RefundsResponse
         data: &types::RefundsRouterData<api::RSync>,
         res: types::Response,
     ) -> CustomResult<types::RefundsRouterData<api::RSync>, errors::ConnectorError> {
+        let query_response = String::from_utf8(res.response.to_vec())
+            .into_report()
+            .change_context(errors::ConnectorError::ResponseDeserializationFailed)?;
+        let (transaction_id, condition) = transformers::get_query_info(query_response)?;
+        let refund_status = get_refund_status(condition)?;
+        Ok(types::RefundSyncRouterData {
+            response: Ok(types::RefundsResponseData {
+                connector_refund_id: transaction_id,
+                refund_status,
+            }),
+            ..data.clone()
+        })
+
+        /* To do implement xml deserialization for QueryResponse in PSync and RSync flow
         let response: nmi::QueryResponse = res
             .response
             .parse_struct("NMI QueryResponse")
@@ -579,6 +600,7 @@ impl ConnectorIntegration<api::RSync, types::RefundsData, types::RefundsResponse
         }
         .try_into()
         .change_context(errors::ConnectorError::ResponseHandlingFailed)
+        */
     }
 
     fn get_error_response(

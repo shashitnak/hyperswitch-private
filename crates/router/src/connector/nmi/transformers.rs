@@ -1,6 +1,7 @@
 use common_utils::pii;
-use error_stack::ResultExt;
+use error_stack::{IntoReport, ResultExt};
 use masking::{PeekInterface, Secret};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -19,19 +20,6 @@ pub enum TransactionType {
     Capture,
     Void,
     Refund,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum PaymentType {
-    CreditCard(Card),
-}
-
-#[derive(Debug, Serialize)]
-pub struct Card {
-    pub ccnumber: Secret<String, pii::CardNumber>,
-    pub ccexp: Secret<String>,
-    pub cvv: Secret<String>,
 }
 
 // Auth Struct
@@ -59,75 +47,81 @@ pub struct NmiPaymentsRequest {
     pub security_key: String,
     pub amount: f64,
     pub currency: enums::Currency,
-    #[serde(flatten)]
-    pub payment_type: PaymentType,
+    pub ccnumber: Secret<String, pii::CardNumber>,
+    pub ccexp: Secret<String>,
+    pub cvv: Secret<String>,
 }
 
 impl TryFrom<&types::PaymentsAuthorizeRouterData> for NmiPaymentsRequest {
     type Error = error_stack::Report<errors::ConnectorError>;
     fn try_from(item: &types::PaymentsAuthorizeRouterData) -> Result<Self, Self::Error> {
-        let transaction_type = match item.request.capture_method {
-            Some(storage_models::enums::CaptureMethod::Automatic) => TransactionType::Sale,
-            Some(storage_models::enums::CaptureMethod::Manual) => TransactionType::Auth,
+        match &item.request.payment_method_data {
+            api::PaymentMethodData::Card(card) => {
+                let expiry_year = card.card_exp_year.peek().clone();
+                let secret_value = format!(
+                    "{}{}",
+                    card.card_exp_month.peek(),
+                    &expiry_year[expiry_year.len() - 2..]
+                );
+                let expiry_date: Secret<String> = Secret::new(secret_value);
+                let transaction_type = match item.request.capture_method {
+                    Some(storage_models::enums::CaptureMethod::Automatic) => TransactionType::Sale,
+                    Some(storage_models::enums::CaptureMethod::Manual) => TransactionType::Auth,
+                    _ => Err(errors::ConnectorError::NotImplemented(
+                        "Capture Method".to_string(),
+                    ))?,
+                };
+                let security_key: NmiAuthType = (&item.connector_auth_type).try_into()?;
+                Ok(Self {
+                    transaction_type,
+                    security_key: security_key.api_key,
+                    amount: utils::convert_to_higher_denomination(
+                        item.request.amount,
+                        item.request.currency,
+                    )?,
+                    currency: item.request.currency,
+                    ccnumber: card.card_number.clone(),
+                    ccexp: expiry_date,
+                    cvv: card.card_cvc.clone(),
+                })
+            }
             _ => Err(errors::ConnectorError::NotImplemented(
-                "Capture Method".to_string(),
-            ))?,
-        };
-        let security_key: NmiAuthType = (&item.connector_auth_type).try_into()?;
-        let security_key = security_key.api_key;
-        let payment_type = get_payment_type(&item.request.payment_method_data)?;
-        Ok(Self {
-            transaction_type,
-            security_key,
-            payment_type,
-            amount: utils::convert_to_higher_denomination(
-                item.request.amount,
-                item.request.currency,
-            )?,
-            currency: item.request.currency,
-        })
-    }
-}
-
-fn get_payment_type(
-    payment_method: &api::PaymentMethodData,
-) -> Result<PaymentType, errors::ConnectorError> {
-    match payment_method {
-        api::PaymentMethodData::Card(card) => {
-            let expiry_year = card.card_exp_year.peek().clone();
-            let secret_value = format!(
-                "{}{}",
-                card.card_exp_month.peek(),
-                &expiry_year[expiry_year.len() - 2..]
-            );
-            let expiry_date: Secret<String> = Secret::new(secret_value);
-            Ok(PaymentType::CreditCard(Card {
-                ccnumber: card.card_number.clone(),
-                ccexp: expiry_date,
-                cvv: card.card_cvc.clone(),
-            }))
+                "Payment Method".to_string(),
+            ))
+            .into_report(),
         }
-        _ => Err(errors::ConnectorError::NotImplemented(
-            "Payment Method".to_string(),
-        )),
     }
 }
 
 impl TryFrom<&types::VerifyRouterData> for NmiPaymentsRequest {
     type Error = error_stack::Report<errors::ConnectorError>;
     fn try_from(item: &types::VerifyRouterData) -> Result<Self, Self::Error> {
-        let transaction_type = TransactionType::Validate;
-        let security_key: NmiAuthType = (&item.connector_auth_type).try_into()?;
-        let security_key = security_key.api_key;
-        let payment_type = get_payment_type(&item.request.payment_method_data)?;
-
-        Ok(Self {
-            transaction_type,
-            security_key,
-            payment_type,
-            amount: 0.0,
-            currency: item.request.currency,
-        })
+        match &item.request.payment_method_data {
+            api::PaymentMethodData::Card(card) => {
+                let expiry_year = card.card_exp_year.peek().clone();
+                let secret_value = format!(
+                    "{}{}",
+                    card.card_exp_month.peek(),
+                    &expiry_year[expiry_year.len() - 2..]
+                );
+                let expiry_date: Secret<String> = Secret::new(secret_value);
+                let transaction_type = TransactionType::Validate;
+                let security_key: NmiAuthType = (&item.connector_auth_type).try_into()?;
+                Ok(Self {
+                    transaction_type,
+                    security_key: security_key.api_key,
+                    amount: 0.0,
+                    currency: item.request.currency,
+                    ccnumber: card.card_number.clone(),
+                    ccexp: expiry_date,
+                    cvv: card.card_cvc.clone(),
+                })
+            }
+            _ => Err(errors::ConnectorError::NotImplemented(
+                "Payment Method".to_string(),
+            ))
+            .into_report(),
+        }
     }
 }
 
@@ -201,7 +195,7 @@ impl TryFrom<(&types::PaymentsCancelData, ConnectorAuthType)> for NmiCancelReque
         let security_key = security_key.api_key;
 
         Ok(Self {
-            transaction_type: TransactionType::Capture,
+            transaction_type: TransactionType::Void,
             security_key,
             transactionid: item.connector_transaction_id.clone(),
             void_reason: item.cancellation_reason.clone(),
@@ -379,8 +373,13 @@ pub struct Transaction {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct QueryResponse {
+pub struct NMResponse {
     pub transaction: Transaction,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct QueryResponse {
+    pub nm_response: NMResponse,
 }
 
 impl TryFrom<types::PaymentsSyncResponseRouterData<QueryResponse>>
@@ -391,10 +390,10 @@ impl TryFrom<types::PaymentsSyncResponseRouterData<QueryResponse>>
         item: types::PaymentsSyncResponseRouterData<QueryResponse>,
     ) -> Result<Self, Self::Error> {
         Ok(Self {
-            status: enums::AttemptStatus::from(item.response.transaction.condition),
+            status: enums::AttemptStatus::from(item.response.nm_response.transaction.condition),
             response: Ok(types::PaymentsResponseData::TransactionResponse {
                 resource_id: types::ResponseId::ConnectorTransactionId(
-                    item.response.transaction.transaction_id,
+                    item.response.nm_response.transaction.transaction_id,
                 ),
                 redirection_data: None,
                 mandate_reference: None,
@@ -466,9 +465,25 @@ impl TryFrom<types::RefundsResponseRouterData<api::Execute, GenericResponse>>
 impl From<Response> for enums::RefundStatus {
     fn from(item: Response) -> Self {
         match item {
-            Response::Approved => Self::Success,
+            Response::Approved => Self::Pending,
             Response::Declined | Response::Error => Self::Failure,
         }
+    }
+}
+
+impl TryFrom<&types::RefundSyncRouterData> for NmiSyncRequest {
+    type Error = error_stack::Report<errors::ConnectorError>;
+    fn try_from(item: &types::RefundSyncRouterData) -> Result<Self, Self::Error> {
+        let auth = NmiAuthType::try_from(&item.connector_auth_type)?;
+        let transaction_id = match item.request.connector_refund_id.clone() {
+            Some(value) => Ok(value),
+            None => Err(errors::ConnectorError::MissingConnectorRefundID),
+        }?;
+
+        Ok(Self {
+            security_key: auth.api_key,
+            transaction_id,
+        })
     }
 }
 
@@ -479,10 +494,11 @@ impl TryFrom<types::RefundsResponseRouterData<api::RSync, QueryResponse>>
     fn try_from(
         item: types::RefundsResponseRouterData<api::RSync, QueryResponse>,
     ) -> Result<Self, Self::Error> {
-        let refund_status = enums::RefundStatus::from(item.response.transaction.condition);
+        let refund_status =
+            enums::RefundStatus::from(item.response.nm_response.transaction.condition);
         Ok(Self {
             response: Ok(types::RefundsResponseData {
-                connector_refund_id: item.response.transaction.transaction_id,
+                connector_refund_id: item.response.nm_response.transaction.transaction_id,
                 refund_status,
             }),
             ..item.data
@@ -507,4 +523,58 @@ impl From<Condition> for enums::RefundStatus {
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq)]
 pub struct NmiErrorResponse {
     pub error_code: String,
+}
+
+pub fn get_query_info(query_response: String) -> Result<(String, String), errors::ConnectorError> {
+    let transaction_id_regex = Regex::new("<transaction_id>(.*)</transaction_id>")
+        .map_err(|_| errors::ConnectorError::ResponseHandlingFailed)?;
+    let mut transaction_id = None;
+    for tid in transaction_id_regex.captures_iter(&query_response) {
+        transaction_id = Some(tid[1].to_string());
+    }
+
+    let condition_rejex = Regex::new("<condition>(.*)</condition>")
+        .map_err(|_| errors::ConnectorError::ResponseHandlingFailed)?;
+    let mut condition = None;
+    for cid in condition_rejex.captures_iter(&query_response) {
+        condition = Some(cid[1].to_string());
+    }
+
+    let transaction_id = match transaction_id {
+        Some(value) => Ok(value),
+        None => Err(errors::ConnectorError::ResponseHandlingFailed),
+    }?;
+
+    let condition = match condition {
+        Some(value) => Ok(value),
+        None => Err(errors::ConnectorError::ResponseHandlingFailed),
+    }?;
+    Ok((transaction_id, condition))
+}
+
+pub fn get_attempt_status(
+    value: String,
+    capture_method: Option<enums::CaptureMethod>,
+) -> Result<enums::AttemptStatus, errors::ConnectorError> {
+    match value.as_str() {
+        "abandoned" => Ok(enums::AttemptStatus::AuthorizationFailed),
+        "canceled" => Ok(enums::AttemptStatus::Voided),
+        "pending" => match capture_method.unwrap_or_default() {
+            storage_models::enums::CaptureMethod::Manual => Ok(enums::AttemptStatus::Authorized),
+            _ => Ok(enums::AttemptStatus::Pending),
+        },
+        "in_progress" => Ok(enums::AttemptStatus::Pending),
+        "pendingsettlement" | "complete" => Ok(enums::AttemptStatus::Charged),
+        "failed" | "unknown" => Ok(enums::AttemptStatus::Failure),
+        _ => Err(errors::ConnectorError::ResponseHandlingFailed),
+    }
+}
+
+pub fn get_refund_status(value: String) -> Result<enums::RefundStatus, errors::ConnectorError> {
+    match value.as_str() {
+        "abandoned" | "canceled" | "failed" | "unknown" => Ok(enums::RefundStatus::Failure),
+        "pending" | "in_progress" => Ok(enums::RefundStatus::Pending),
+        "pendingsettlement" | "complete" => Ok(enums::RefundStatus::Success),
+        _ => Err(errors::ConnectorError::ResponseHandlingFailed),
+    }
 }
